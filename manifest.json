@@ -76,7 +76,7 @@
       "name": "FlixIndia",
       "description": "Streaming provider for FlixIndia",
       "version": "1.0.0",
-      "filename": "src/providers/flixindia.js",
+      "filename": "providers/flixindia.js",
       "logo": "https://m.flixindia.xyz/onepieceskull.png",
       "supportedTypes": [
         "movie",
