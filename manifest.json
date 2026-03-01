@@ -93,6 +93,19 @@
       "contentLanguage": ["en"] 
     },
     {
+      "id": "hdhub4u",
+      "name": "Hdhub4u",
+      "description": "Auto-generated description for Hdhub4u",
+      "version": "1.0.0",
+      "author": "Michat88",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/hdhub4u.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://via.placeholder.com/150",
+      "contentLanguage": ["en"]
+    },
+    {
       "id": "kisskh",
       "name": "Kisskh",
       "description": "Asian Drama & Anime streaming",
