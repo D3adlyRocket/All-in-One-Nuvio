@@ -76,7 +76,7 @@
       "filename": "src/providers/movies4u.js",
       "enabled": true,
       "formats": ["mp4", "mkv", "m3u8"],
-      "logo": "",
+      "logo": "https://i.postimg.cc/J0QG1QhQ/FB-IMG-1772347875168.jpg",
       "contentLanguage": ["en", "hi", "ta"] 
     }
   ]
