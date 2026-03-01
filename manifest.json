@@ -80,6 +80,19 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "castle",
+      "name": "Castle",
+      "description": "Auto-generated description for Castle",
+      "version": "1.0.0",
+      "author": "Michat88",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/castle.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/0NvGzFyK/castle.png",
+      "contentLanguage": ["en"]
+    },
+    {
       "id": "dahmermovies",
       "name": "Dahmermovies",
       "description": "Auto-generated description for Dahmermovies",
