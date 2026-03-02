@@ -145,6 +145,19 @@
       "contentLanguage": ["en"] 
     },
     {
+      "id": "uhdmovies",
+      "name": "Uhdmovies",
+      "description": "Auto-generated description for Uhdmovies",
+      "version": "1.0.0",
+      "author": "Michat88",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/uhdmovies.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/KzDBBdbK/uhdmovies.png",
+      "contentLanguage": ["en"]  
+    },
+    {
       "id": "kisskh",
       "name": "Kisskh",
       "description": "Asian Drama & Anime streaming",
