@@ -1,63 +1,87 @@
+// uhdmovies.js
+import cheerio from "cheerio";
 
-const cheerio = require("cheerio");
-const fetch = (...args) => import("node-fetch").then(({default: fetch}) => fetch(...args));
+const BASE = "https://uhdmovies.email";
 
-async function makeRequest(url){
-  return fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }});
+// Minimal HTTP request helper
+async function makeRequest(url) {
+  return fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "text/html"
+    }
+  });
+}
+
+// Search UHDMovies for a query
+async function search(query, year) {
+  try {
+    const url = `${BASE}/?s=${encodeURIComponent(query)}`;
+    const res = await makeRequest(url);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const results = [];
+
+    $("article").each((i, el) => {
+      const title = $(el).find("h2").text().trim();
+      const link = $(el).find("a").attr("href");
+      if (!link) return;
+
+      // Optional year filtering
+      if (year && title.includes(year)) {
+        results.push({ title, url: link });
+      } else if (!year) {
+        results.push({ title, url: link });
+      }
+    });
+
+    return results;
+  } catch (err) {
+    console.error("[UHDMovies] Search failed:", err.message);
+    return [];
+  }
 }
 
 // Extract download links from movie page
-async function extractDownloadLinks(movieUrl, targetYear = null) {
+async function extractDownloadLinks(movieUrl) {
   try {
-    const response = await makeRequest(movieUrl);
-    const html = await response.text();
-
-    const links = [];
+    const res = await makeRequest(movieUrl);
+    const html = await res.text();
     const $ = cheerio.load(html);
     const movieTitle = $("h1").first().text().trim();
 
-    $("a").each((index, element) => {
-      const link = $(element).attr("href");
-      if (!link) return;
+    const links = [];
 
-      const lower = link.toLowerCase();
+    $("a").each((i, el) => {
+      const href = $(el).attr("href");
+      if (!href) return;
 
+      const lower = href.toLowerCase();
       if (
         lower.includes("drive") ||
         lower.includes("gdtot") ||
         lower.includes("hubcloud") ||
         lower.includes("pixeldrain") ||
-        lower.includes("tech.") ||
+        lower.includes("tech") ||
+        lower.includes("download") ||
         lower.includes("video-seed") ||
-        lower.includes("video-leech") ||
-        lower.includes("/goto/") ||
-        lower.includes("/download/")
+        lower.includes("video-leech")
       ) {
-        if (links.some(item => item.url === link)) return;
+        const blockText = $(el).closest("p, li, div").text();
 
         let quality = "Unknown";
         let size = "Unknown";
 
-        const blockText = $(element).closest("p, li, div").text();
+        const q = blockText.match(/\b(2160p|1080p|720p|480p|4K)\b/i);
+        if (q) quality = q[1];
 
-        const sizeMatch = blockText.match(/\b([0-9.]+\s?(GB|MB))\b/i);
-        if (sizeMatch) size = sizeMatch[1];
-
-        const qualityMatch = blockText.match(/\b(2160p|1080p|720p|480p|4K)\b/i);
-        if (qualityMatch) quality = qualityMatch[1];
-
-        if (quality === "Unknown") {
-          const prev = $(element).closest("p, div, li").prev();
-          if (prev.length) {
-            const prevText = prev.text();
-            const q = prevText.match(/\b(2160p|1080p|720p|480p|4K)\b/i);
-            if (q) quality = q[1];
-          }
-        }
+        const s = blockText.match(/\b([0-9.]+\s?(GB|MB))\b/i);
+        if (s) size = s[1];
 
         links.push({
           title: movieTitle,
-          url: link.startsWith("http") ? link : new URL(link, movieUrl).href,
+          url: href.startsWith("http") ? href : new URL(href, movieUrl).href,
           quality,
           size
         });
@@ -65,29 +89,37 @@ async function extractDownloadLinks(movieUrl, targetYear = null) {
     });
 
     return links;
-
-  } catch (error) {
-    console.error("Extraction failed:", error.message);
+  } catch (err) {
+    console.error("[UHDMovies] Extract links failed:", err.message);
     return [];
   }
 }
 
-// Main function Nuvio calls
+// Get streams for Nuvio
 async function getStreams(movie) {
   try {
-    const results = await extractDownloadLinks(movie.url, movie.year);
+    const results = await search(movie.title, movie.year);
+    if (!results.length) return [];
 
-    return results.map(link => ({
-      name: "UHDMovies",
-      title: `${link.quality} ${link.size}`,
-      url: link.url,
-      isDirect: false
+    const pageUrl = results[0].url;
+    const downloads = await extractDownloadLinks(pageUrl);
+
+    return downloads.map(d => ({
+      url: d.url,
+      quality: d.quality,
+      size: d.size,
+      type: "torrent" // can be "direct" or "torrent"
     }));
-
-  } catch (e) {
-    console.error("getStreams error:", e);
+  } catch (err) {
+    console.error("[UHDMovies] getStreams failed:", err.message);
     return [];
   }
 }
 
-module.exports = { getStreams };
+// Export for Nuvio
+export default {
+  id: "uhdmovies",
+  name: "UHDMovies",
+  search,
+  getStreams
+};
