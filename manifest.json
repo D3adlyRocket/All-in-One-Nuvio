@@ -155,7 +155,20 @@
       "enabled": true,
       "formats": ["mp4", "m3u8"],
       "logo": "https://i.postimg.cc/KzDBBdbK/uhdmovies.png",
-      "contentLanguage": ["en"]  
+      "contentLanguage": ["en"] 
+    },
+    {
+      "id": "vidlink",
+      "name": "Vidlink",
+      "description": "Auto-generated description for Vidlink",
+      "version": "1.0.0",
+      "author": "Michat88",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/vidlink.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/dVg991QQ/vidlink.png",
+      "contentLanguage": ["en"]
     },
     {
       "id": "kisskh",
