@@ -195,6 +195,6 @@
       "formats": ["mp4", "mkv", "m3u8"],
       "logo": "https://dramafull.cc/favicon.ico",
       "contentLanguage": ["en", "ko", "zh", "ja"] 
-    },
+    }
   ]
 }
