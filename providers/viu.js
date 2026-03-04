@@ -5,19 +5,30 @@ async function extractStream(url) {
     const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0",
-        "Referer": "https://vidsrc.to/"
+        Referer: "https://vidsrc.to/"
       }
     });
 
     const html = await res.text();
 
-    const match =
-      html.match(/file:\s*"(https:[^"]+\.m3u8[^"]*)"/) ||
-      html.match(/"(https:[^"]+\.m3u8[^"]*)"/);
+    // Grab JSON inside VidSrc player JS
+    const jsMatch = html.match(/var\s+player_.*?=\s*(\{.*\});/s);
+    if (!jsMatch) return null;
 
-    if (!match) return null;
+    let data;
+    try {
+      data = JSON.parse(jsMatch[1]);
+    } catch (e) {
+      return null;
+    }
 
-    return match[1];
+    if (!data || !data.sources) return null;
+
+    // Find first .m3u8 URL
+    const m3u8 = data.sources.find(s => s.file && s.file.endsWith(".m3u8"));
+    if (!m3u8) return null;
+
+    return m3u8.file;
   } catch (err) {
     console.log("[viu] extract error:", err.message);
     return null;
