@@ -1,125 +1,173 @@
-// uhdmovies.js
-import cheerio from "cheerio";
+// UHDMovies Scraper (Fixed for 2026 Nuvio)
+// React Native compatible
 
-const BASE = "https://uhdmovies.email";
+const cheerio = require("cheerio-without-node-native")
 
-// Minimal HTTP request helper
-async function makeRequest(url) {
-  return fetch(url, {
+console.log("[UHDMovies] scraper loaded")
+
+const MIRRORS = [
+  "https://uhdmovies.email",
+  "https://uhdmovies.fyi",
+  "https://uhdmovies.zip"
+]
+
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+
+async function request(url) {
+  const res = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0",
-      "Accept": "text/html"
+      "User-Agent": UA,
+      Accept: "*/*"
     }
-  });
+  })
+
+  if (!res.ok) throw new Error("HTTP " + res.status)
+
+  return res.text()
 }
 
-// Search UHDMovies for a query
-async function search(query, year) {
+async function getWorkingDomain() {
+  for (const domain of MIRRORS) {
+    try {
+      const r = await fetch(domain, { headers: { "User-Agent": UA } })
+      if (r.ok) return domain
+    } catch {}
+  }
+
+  return MIRRORS[0]
+}
+
+async function search(domain, query) {
+  const url = `${domain}/?s=${encodeURIComponent(query)}`
+  console.log("[UHDMovies] search:", url)
+
+  const html = await request(url)
+
+  const $ = cheerio.load(html)
+
+  const results = []
+
+  $("article, .post, .blog-item").each((i, el) => {
+    const link = $(el).find("a[href*='download']").attr("href")
+
+    if (!link) return true
+
+    let title =
+      $(el).find("h2,h3,h1").first().text().trim() ||
+      $(el).find("a").first().attr("title") ||
+      ""
+
+    if (!title) return true
+
+    const yearMatch = title.match(/\((\d{4})\)/)
+
+    results.push({
+      title: title.replace(/\(\d{4}\)/, "").trim(),
+      year: yearMatch ? Number(yearMatch[1]) : null,
+      url: link.startsWith("http") ? link : domain + link
+    })
+  })
+
+  console.log("[UHDMovies] results:", results.length)
+
+  return results
+}
+
+function extractQuality(text) {
+  if (!text) return "Unknown"
+
+  const t = text.toLowerCase()
+
+  if (t.includes("2160") || t.includes("4k")) return "4K"
+  if (t.includes("1080")) return "1080p"
+  if (t.includes("720")) return "720p"
+  if (t.includes("480")) return "480p"
+
+  return "HD"
+}
+
+async function extractLinks(pageUrl) {
+  console.log("[UHDMovies] open:", pageUrl)
+
+  const html = await request(pageUrl)
+
+  const $ = cheerio.load(html)
+
+  const links = []
+
+  $("a").each((i, el) => {
+    const href = $(el).attr("href")
+
+    if (!href) return true
+
+    if (
+      href.includes("tech.") ||
+      href.includes("video-seed") ||
+      href.includes("video-leech") ||
+      href.includes("driveleech")
+    ) {
+      const text = $(el).parent().text()
+
+      links.push({
+        url: href,
+        quality: extractQuality(text)
+      })
+    }
+  })
+
+  console.log("[UHDMovies] links:", links.length)
+
+  return links
+}
+
+async function resolveLink(url) {
   try {
-    const url = `${BASE}/?s=${encodeURIComponent(query)}`;
-    const res = await makeRequest(url);
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const html = await request(url)
 
-    const results = [];
+    const meta = html.match(/url=(https?:\/\/[^"]+)/i)
 
-    $("article").each((i, el) => {
-      const title = $(el).find("h2").text().trim();
-      const link = $(el).find("a").attr("href");
-      if (!link) return;
+    if (meta) return meta[1]
 
-      // Optional year filtering
-      if (year && title.includes(year)) {
-        results.push({ title, url: link });
-      } else if (!year) {
-        results.push({ title, url: link });
-      }
-    });
+    const direct = html.match(/https?:\/\/[^"' ]+(mkv|mp4|m3u8)/i)
 
-    return results;
-  } catch (err) {
-    console.error("[UHDMovies] Search failed:", err.message);
-    return [];
+    if (direct) return direct[0]
+
+    return url
+  } catch {
+    return url
   }
 }
 
-// Extract download links from movie page
-async function extractDownloadLinks(movieUrl) {
+module.exports = async function scraper(media) {
   try {
-    const res = await makeRequest(movieUrl);
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    const movieTitle = $("h1").first().text().trim();
+    const domain = await getWorkingDomain()
 
-    const links = [];
+    const query = media.title || media.name
 
-    $("a").each((i, el) => {
-      const href = $(el).attr("href");
-      if (!href) return;
+    const results = await search(domain, query)
 
-      const lower = href.toLowerCase();
-      if (
-        lower.includes("drive") ||
-        lower.includes("gdtot") ||
-        lower.includes("hubcloud") ||
-        lower.includes("pixeldrain") ||
-        lower.includes("tech") ||
-        lower.includes("download") ||
-        lower.includes("video-seed") ||
-        lower.includes("video-leech")
-      ) {
-        const blockText = $(el).closest("p, li, div").text();
+    if (!results.length) return []
 
-        let quality = "Unknown";
-        let size = "Unknown";
+    const page = results[0]
 
-        const q = blockText.match(/\b(2160p|1080p|720p|480p|4K)\b/i);
-        if (q) quality = q[1];
+    const links = await extractLinks(page.url)
 
-        const s = blockText.match(/\b([0-9.]+\s?(GB|MB))\b/i);
-        if (s) size = s[1];
+    const streams = []
 
-        links.push({
-          title: movieTitle,
-          url: href.startsWith("http") ? href : new URL(href, movieUrl).href,
-          quality,
-          size
-        });
-      }
-    });
+    for (const l of links) {
+      const final = await resolveLink(l.url)
 
-    return links;
+      streams.push({
+        name: "UHDMovies",
+        title: l.quality,
+        url: final
+      })
+    }
+
+    return streams
   } catch (err) {
-    console.error("[UHDMovies] Extract links failed:", err.message);
-    return [];
+    console.log("[UHDMovies] error:", err.message)
+    return []
   }
 }
-
-// Get streams for Nuvio
-async function getStreams(movie) {
-  try {
-    const results = await search(movie.title, movie.year);
-    if (!results.length) return [];
-
-    const pageUrl = results[0].url;
-    const downloads = await extractDownloadLinks(pageUrl);
-
-    return downloads.map(d => ({
-      url: d.url,
-      quality: d.quality,
-      size: d.size,
-      type: "torrent" // can be "direct" or "torrent"
-    }));
-  } catch (err) {
-    console.error("[UHDMovies] getStreams failed:", err.message);
-    return [];
-  }
-}
-
-// Export for Nuvio
-export default {
-  id: "uhdmovies",
-  name: "UHDMovies",
-  search,
-  getStreams
-};
