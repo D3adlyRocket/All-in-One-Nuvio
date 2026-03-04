@@ -171,6 +171,19 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "vixsrc",
+      "name": "Vixsrc",
+      "description": "Auto-generated description for Vidlink",
+      "version": "1.0.0",
+      "author": "Michat88",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/vixsrc.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en"]
+    },
+    {
       "id": "domty",
       "name": "Domty",
       "description": "streaming",
