@@ -1,158 +1,117 @@
-console.log('[DOMTY] Provider loaded');
+console.log('[DOMTY] Provider Loaded');
 
-const DOMTY_SITES = [
-  'https://mycima.cc',
-  'https://wecima.movie',
-  'https://akwam.to'
-];
+const TMDB = "https://api.themoviedb.org/3";
+const KEY = "1";
 
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-  'Accept': '*/*',
-  'Connection': 'keep-alive'
+const BASE_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+  Accept: "*/*",
 };
 
-function request(url, headers) {
+const SITES = [
+  "https://mycima.horse",
+  "https://fajer.show",
+  "https://ak.sv",
+  "https://cimawbas.org",
+];
+
+function request(url, headers = {}) {
   return fetch(url, {
-    headers: Object.assign({}, HEADERS, headers || {})
-  }).then(function (res) {
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.text();
+    headers: { ...BASE_HEADERS, ...headers },
+  }).then((r) => r.text());
+}
+
+function getTitle(id, type) {
+  return fetch(`${TMDB}/${type}/${id}?api_key=${KEY}`)
+    .then((r) => r.json())
+    .then((d) => d.title || d.name || id)
+    .catch(() => id);
+}
+
+function findPlayer(html) {
+  const match = html.match(/<iframe[^>]+src="([^"]+)"/i);
+  return match ? match[1] : null;
+}
+
+function findStream(html) {
+  const m3u8 = html.match(/https?:\/\/[^"' ]+\.m3u8[^"' ]*/i);
+  if (m3u8) return m3u8[0];
+
+  const mp4 = html.match(/https?:\/\/[^"' ]+\.mp4[^"' ]*/i);
+  if (mp4) return mp4[0];
+
+  return null;
+}
+
+function search(site, query) {
+  const url = `${site}/?s=${encodeURIComponent(query)}`;
+
+  return request(url).then((html) => {
+    const m = html.match(/<a href="([^"]+)"[^>]*>(.*?)<\/a>/i);
+    return m ? m[1] : null;
   });
 }
 
-function extractSources(html) {
-  const sources = [];
-  const re = /(https?:\/\/[^"' ]+\.(m3u8|mp4)[^"' ]*)/gi;
-  let m;
+function scrapePage(url) {
+  return request(url).then((html) => {
+    const iframe = findPlayer(html);
+    if (!iframe) return null;
 
-  while ((m = re.exec(html)) !== null) {
-    if (sources.indexOf(m[1]) === -1) {
-      sources.push(m[1]);
-    }
-  }
-
-  return sources;
-}
-
-function extractIframes(html) {
-  const frames = [];
-  const re = /<iframe[^>]+src=["']([^"']+)["']/gi;
-  let m;
-
-  while ((m = re.exec(html)) !== null) {
-    if (m[1].indexOf('http') === 0) frames.push(m[1]);
-  }
-
-  return frames;
-}
-
-function searchSite(base, query) {
-  const url = base + '/?s=' + encodeURIComponent(query);
-
-  return request(url, { Referer: base }).then(function (html) {
-    const results = [];
-    const re = /<a[^>]+href=["'](https?:\/\/[^"']+)["']/gi;
-    let m;
-
-    while ((m = re.exec(html)) !== null) {
-      if (m[1].indexOf(base) !== -1) {
-        results.push(m[1]);
-      }
-    }
-
-    return results.slice(0, 3);
-  }).catch(function () {
-    return [];
+    return request(iframe, { Referer: url }).then((playerHtml) => {
+      return findStream(playerHtml);
+    });
   });
 }
 
-function getPageStreams(url) {
-  return request(url).then(function (html) {
+function trySites(title) {
+  let index = 0;
 
-    let streams = extractSources(html);
-    if (streams.length) return streams;
+  function next() {
+    if (index >= SITES.length) return Promise.resolve(null);
 
-    const iframes = extractIframes(html);
+    const site = SITES[index++];
 
-    return Promise.all(
-      iframes.slice(0, 3).map(function (frame) {
-        return request(frame, { Referer: url })
-          .then(function (inner) {
-            return extractSources(inner);
-          })
-          .catch(function () {
-            return [];
-          });
+    return search(site, title)
+      .then((url) => {
+        if (!url) return next();
+        return scrapePage(url);
       })
-    ).then(function (lists) {
-      return lists.reduce(function (a, b) {
-        return a.concat(b);
-      }, streams);
-    });
-  }).catch(function () {
-    return [];
-  });
+      .then((stream) => {
+        if (stream) return stream;
+        return next();
+      })
+      .catch(next);
+  }
+
+  return next();
 }
 
-function getTMDB(tmdbId, mediaType) {
-  const url =
-    'https://api.themoviedb.org/3/' +
-    (mediaType === 'tv' ? 'tv/' : 'movie/') +
-    tmdbId;
+function getStreams(tmdbId, type = "movie") {
+  console.log("[DOMTY] Fetching", tmdbId);
 
-  return request(url).then(function (html) {
-    try {
-      const json = JSON.parse(html);
-      return json.title || json.name || tmdbId;
-    } catch {
-      return tmdbId;
-    }
-  });
-}
+  return getTitle(tmdbId, type)
+    .then((title) => {
+      console.log("[DOMTY] Title:", title);
+      return trySites(title);
+    })
+    .then((stream) => {
+      if (!stream) {
+        console.log("[DOMTY] No streams found");
+        return { sources: [], subtitles: [] };
+      }
 
-function getStreams(tmdbId, mediaType, season, episode) {
-
-  console.log('[DOMTY] Fetching streams for', tmdbId);
-
-  return getTMDB(tmdbId, mediaType).then(function (title) {
-
-    console.log('[DOMTY] Title:', title);
-
-    const tasks = DOMTY_SITES.map(function (site) {
-
-      return searchSite(site, title).then(function (results) {
-
-        if (!results.length) return [];
-
-        return getPageStreams(results[0]).then(function (links) {
-
-          return links.map(function (l) {
-            return {
-              name: 'DOMTY',
-              url: l,
-              quality: 'HD',
-              headers: { Referer: results[0] }
-            };
-          });
-        });
-      });
+      return {
+        sources: [
+          {
+            url: stream,
+            quality: "HD",
+            type: stream.includes("m3u8") ? "hls" : "mp4",
+          },
+        ],
+        subtitles: [],
+      };
     });
-
-    return Promise.all(tasks).then(function (all) {
-
-      const flat = all.reduce(function (a, b) {
-        return a.concat(b);
-      }, []);
-
-      const seen = {};
-      return flat.filter(function (s) {
-        if (seen[s.url]) return false;
-        seen[s.url] = true;
-        return true;
-      });
-    });
-  });
 }
 
 module.exports = { getStreams };
