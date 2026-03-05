@@ -1,110 +1,72 @@
-console.log("[UHDMovies] Provider Loaded");
+console.log("UHDMovies provider loaded");
 
-const TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
-const BASE = "https://uhdmovies.tips";
+const TMDB = "439c478a771f35c05022f9feabcca01c";
+const DOMAIN = "https://uhdmovies.tips";
 
-function req(url){
+function request(url){
     return fetch(url,{
         headers:{
             "User-Agent":"Mozilla/5.0",
             "Accept":"text/html"
         }
     }).then(r=>{
-        if(!r.ok) throw new Error("HTTP "+r.status);
+        if(!r.ok) throw new Error();
         return r.text();
     });
 }
 
-function quality(text){
-    if(!text) return "HD";
-    text=text.toLowerCase();
-    if(text.includes("2160")) return "2160p";
-    if(text.includes("1080")) return "1080p";
-    if(text.includes("720")) return "720p";
-    return "HD";
+function findPost(html){
+    const m = html.match(/<a href="(https:\/\/uhdmovies[^"]+)"[^>]*class="post-title"/i);
+    return m ? m[1] : null;
 }
 
-function extractPosts(html){
-    const posts=[];
-    const regex=/<a href="([^"]+)"[^>]*rel="bookmark"/gi;
-    let m;
-    while((m=regex.exec(html))!==null){
-        posts.push(m[1]);
-    }
-    return posts;
-}
-
-function extractButtons(html){
-    const links=[];
-    const regex=/<a[^>]*href="([^"]+)"[^>]*>(Download|V-Cloud|GDToT|Driveleech|Instant)[^<]*<\/a>/gi;
-    let m;
-    while((m=regex.exec(html))!==null){
-        links.push(m[1]);
-    }
-    return links;
-}
-
-function followRedirect(url){
-    return fetch(url,{redirect:"follow"}).then(r=>r.url).catch(()=>null);
-}
-
-async function scrape(title,year){
-
-    const search=`${BASE}/?s=${encodeURIComponent(title+" "+year)}`;
-    console.log("[UHDMovies] search:",search);
-
-    const html=await req(search).catch(()=>null);
-    if(!html) return [];
-
-    const posts=extractPosts(html);
-    if(!posts.length) return [];
-
-    const page=await req(posts[0]).catch(()=>null);
-    if(!page) return [];
-
-    const buttons=extractButtons(page);
+function extractLinks(html){
 
     const results=[];
+    const regex=/<a href="(https?:\/\/[^"]+)"/gi;
 
-    for(const b of buttons){
+    let m;
+    while((m=regex.exec(html))!==null){
 
-        const final=await followRedirect(b);
-        if(!final) continue;
+        const url=m[1];
 
-        results.push({
-            name:"UHDMovies",
-            title:"UHDMovies "+quality(final),
-            url:final,
-            quality:quality(final),
-            provider:"uhdmovies"
-        });
+        if(
+            url.includes("driveleech") ||
+            url.includes("gdflix") ||
+            url.includes("hubdrive") ||
+            url.includes("pixeldrain") ||
+            url.includes("1fichier")
+        ){
+            results.push({
+                name:"UHDMovies",
+                title:"UHDMovies",
+                url:url,
+                quality:"HD",
+                provider:"uhdmovies"
+            });
+        }
     }
 
     return results;
 }
 
-function getStreams(tmdbId,mediaType="movie",season=null,episode=null){
+async function scrape(title,year){
 
-    const tmdb=`https://api.themoviedb.org/3/${mediaType==="tv"?"tv":"movie"}/${tmdbId}?api_key=${TMDB_API_KEY}`;
+    const search=`${DOMAIN}/?s=${encodeURIComponent(title+" "+year)}`;
+    console.log("search",search);
 
-    return fetch(tmdb)
-    .then(r=>r.json())
-    .then(data=>{
+    const searchHtml=await request(search).catch(()=>null);
+    if(!searchHtml) return [];
 
-        const title=mediaType==="tv"?data.name:data.title;
-        const year=mediaType==="tv"
-            ?data.first_air_date?.slice(0,4)
-            :data.release_date?.slice(0,4);
+    const post=findPost(searchHtml);
+    if(!post) return [];
 
-        if(!title) return [];
+    const page=await request(post).catch(()=>null);
+    if(!page) return [];
 
-        return scrape(title,year);
-    })
-    .catch(()=>[]);
+    return extractLinks(page);
 }
 
-if(typeof module!=="undefined"){
-    module.exports={getStreams};
-}else{
-    global.getStreams=getStreams;
-}
+function getStreams(tmdbId,type="movie",season=null,episode=null){
+
+    const url=`https://api.themov
