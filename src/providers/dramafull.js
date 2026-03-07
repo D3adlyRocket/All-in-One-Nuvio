@@ -1,7 +1,320 @@
+const cheerio = require('cheerio-without-node-native');
+const axios = require('axios');
+
+const DRAMAFULL_BASE = "https://dramafull.cc";
+const TMDB_API_KEY = '1b3113663c9004682ed61086cf967c44';
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+
+const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': DRAMAFULL_BASE + '/'
+};
+
 /**
- * dramafull - Built from src/dramafull/
- * Generated: 2026-01-14T14:30:23.129Z
+ * Normalizes title for comparison
  */
-var W=Object.defineProperty,H=Object.defineProperties;var P=Object.getOwnPropertyDescriptors;var _=Object.getOwnPropertySymbols;var C=Object.prototype.hasOwnProperty,K=Object.prototype.propertyIsEnumerable;var k=(e,l,t)=>l in e?W(e,l,{enumerable:!0,configurable:!0,writable:!0,value:t}):e[l]=t,N=(e,l)=>{for(var t in l||(l={}))C.call(l,t)&&k(e,t,l[t]);if(_)for(var t of _(l))K.call(l,t)&&k(e,t,l[t]);return e},T=(e,l)=>H(e,P(l));var y=(e,l,t)=>new Promise((i,a)=>{var n=r=>{try{u(t.next(r))}catch(g){a(g)}},c=r=>{try{u(t.throw(r))}catch(g){a(g)}},u=r=>r.done?i(r.value):Promise.resolve(r.value).then(n,c);u((t=t.apply(e,l)).next())});var Y=require("cheerio-without-node-native"),D=require("axios"),$="https://dramafull.cc",G="1b3113663c9004682ed61086cf967c44",j="https://api.themoviedb.org/3",d={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",Accept:"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8","Accept-Language":"en-US,en;q=0.9",Referer:$+"/"};function L(e){return e?e.toLowerCase().replace(/[-:]/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim():""}function J(e,l){let t=L(e),i=L(l);if(t===i)return 1;if(t.length>5&&i.length>5&&(i.includes(t)||t.includes(i)))return .9;let a=new Set(t.split(/\s+/).filter(r=>r.length>2)),n=new Set(i.split(/\s+/).filter(r=>r.length>2));if(a.size===0||n.size===0)return 0;let c=new Set([...a].filter(r=>n.has(r))),u=new Set([...a,...n]);return c.size/u.size}function O(e,l){return y(this,null,function*(){let i=`${j}/${l==="tv"?"tv":"movie"}/${e}?api_key=${G}`;try{let n=(yield D.get(i,{headers:{"User-Agent":d["User-Agent"]},timeout:1e4})).data;return{title:n.name||n.title,year:(n.first_air_date||n.release_date||"").split("-")[0]}}catch(a){return console.error("[DramaFull] TMDB fetch failed:",a.message),null}})}function Q(e,l,t,i,a=""){let n=String(t||1).padStart(2,"0"),c=String(i||1).padStart(2,"0"),u=t?` - S${n} E${c}`:"",r=`DramaFull (${l}) [DramaFull]
-\u{1F4F9}: ${e}${u}`;return a&&(r+=`
-\u{1F3A7}: ${a}`),r}function q(e){return y(this,null,function*(){try{let l=`${$}/api/live-search/${encodeURIComponent(e)}`,t=yield D.get(l,{headers:d,timeout:1e4});return t.data&&t.data.success?t.data.data||[]:[]}catch(l){return console.error("[DramaFull] Search failed:",l.message),[]}})}function V(e,l="movie",t=null,i=null){return y(this,null,function*(){try{let a;if(typeof e=="string"&&isNaN(e)?a={title:e}:a=yield O(e,l),!(a!=null&&a.title))if(console.error("[DramaFull] No media info found for:",e),typeof e=="string")console.log(`[DramaFull] Using tmdbId string "${e}" as fallback title`),a={title:e};else return[];console.log(`[DramaFull] Searching for: ${a.title}`);let n=yield q(a.title);if(n.length===0&&a.title.includes(":")){let s=a.title.split(":")[0].trim();console.log(`[DramaFull] No results for full title, trying: ${s}`),n=yield q(s)}if(n.length===0)return console.log("[DramaFull] No search results found."),[];let c=null,u=0,r=parseInt(e);if(isNaN(r)||(c=n.find(s=>s.themoviedb_id===r),c&&(console.log(`[DramaFull] Exact TMDB ID match found: ${c.name}`),u=1)),!c)for(let s of n){let f=J(a.title,s.name);a.year&&s.name.includes(a.year)?(f+=.2,console.log(`[DramaFull] Year match boost for "${s.name}" (+0.2)`)):a.year&&!s.name.includes(a.year)&&s.name.match(/\(\d{4}\)/)&&(f-=.1),console.log(`[DramaFull] Score for "${s.name}": ${f.toFixed(2)}`),f>u&&(u=f,c=s)}if(!c||u<.3)return console.warn(`[DramaFull] No good match found (Max score: ${u.toFixed(2)})`),[];let g=c.slug,U=c.name;console.log(`[DramaFull] Matched drama: ${U} (Slug: ${g}) Score: ${u.toFixed(2)}`);let x=`${$}/film/${g}`;console.log(`[DramaFull] Fetching film page: ${x}`);let z=yield D.get(x,{headers:d,timeout:1e4}),F=Y.load(z.data),w=l==="tv"&&i?i:1,o="";if(F(".episode-item a").each((s,f)=>{let m=F(f),p=m.text().trim(),B=m.attr("title")||"",E=p.match(/(\d+)/);if(E&&parseInt(E[1])===w)return o=m.attr("href"),!1;let R=B.match(/Episode\s*(\d+)/i);if(R&&parseInt(R[1])===w)return o=m.attr("href"),!1}),o||(o=F(".btn-play").attr("href")||F(".last-episode a").attr("href"),o&&l==="movie"?console.log(`[DramaFull] Using movie watch link: ${o}`):o&&w===1?console.log(`[DramaFull] Using fallback watch link for Ep 1: ${o}`):o=""),!o)return console.warn(`[DramaFull] Episode ${w} not found for ${g}`),[];o.startsWith("http")||(o=$+o),console.log(`[DramaFull] Found watch URL: ${o}`);let v=(yield D.get(o,{headers:d,timeout:1e4})).data.match(/window\.signedUrl\s*=\s*"(.*?)"/);if(!v)return console.error("[DramaFull] Failed to extract signedUrl from watch page"),[];let b=v[1].replace(/\\\//g,"/");console.log(`[DramaFull] Found signedUrl: ${b}`);let h=(yield D.get(b,{headers:d,timeout:1e4})).data;if(!h.success||!h.video_source)return console.error("[DramaFull] Failed to get link data or no video sources"),[];let A=[],M=h.video_source,S=[];if(h.sub)for(let s in h.sub){let f=h.sub[s];Array.isArray(f)&&f.forEach(m=>{let p=m;p.startsWith("http")||(p=$+p),S.push({url:p,language:"English"})})}for(let s in M){let f=M[s],m=Q(U,s+"p",t,i,S.length>0?`${S.length} Subs`:"");A.push({name:"DramaFull",title:m,url:f,quality:s+"p",subtitles:S,type:f.includes(".m3u8")?"hls":"mp4",headers:T(N({},d),{Referer:o}),provider:"DramaFull"})}return A}catch(a){return console.error("[DramaFull] getStreams failed:",a.message),[]}})}module.exports={getStreams:V};
+function normalizeTitle(title) {
+    if (!title) return '';
+    return title.toLowerCase()
+        .replace(/[-:]/g, ' ')
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * Calculates similarity between two titles
+ */
+function calculateSimilarity(title1, title2) {
+    const norm1 = normalizeTitle(title1);
+    const norm2 = normalizeTitle(title2);
+
+    if (norm1 === norm2) return 1.0;
+    if (norm1.length > 5 && norm2.length > 5 && (norm2.includes(norm1) || norm1.includes(norm2))) return 0.9;
+
+    const words1 = new Set(norm1.split(/\s+/).filter(w => w.length > 2));
+    const words2 = new Set(norm2.split(/\s+/).filter(w => w.length > 2));
+
+    if (words1.size === 0 || words2.size === 0) return 0;
+
+    const intersection = new Set([...words1].filter(w => words2.has(w)));
+    const union = new Set([...words1, ...words2]);
+
+    return intersection.size / union.size;
+}
+
+/**
+ * Get movie/TV show details from TMDB
+ */
+async function getTMDBDetails(tmdbId, mediaType) {
+    const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
+    const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}`;
+
+    try {
+        const response = await axios.get(url, { headers: { 'User-Agent': HEADERS['User-Agent'] }, timeout: 10000 });
+        const data = response.data;
+        return {
+            title: data.name || data.title,
+            year: (data.first_air_date || data.release_date || '').split('-')[0]
+        };
+    } catch (e) {
+        console.error('[DramaFull] TMDB fetch failed:', e.message);
+        return null;
+    }
+}
+
+/**
+ * Formats the stream title.
+ */
+function formatTitle(title, quality, season, episode, metadata = '') {
+    const s = String(season || 1).padStart(2, '0');
+    const e = String(episode || 1).padStart(2, '0');
+    const epLabel = season ? ` - S${s} E${e}` : '';
+
+    let titleStr = `DramaFull (${quality}) [DramaFull]
+📹: ${title}${epLabel}`;
+
+    if (metadata) {
+        titleStr += `\n🎧: ${metadata}`;
+    }
+
+    return titleStr;
+}
+
+/**
+ * Search for a drama on DramaFull
+ */
+async function search(query) {
+    try {
+        const url = `${DRAMAFULL_BASE}/api/live-search/${encodeURIComponent(query)}`;
+        const response = await axios.get(url, { headers: HEADERS, timeout: 10000 });
+        if (response.data && response.data.success) {
+            return response.data.data || [];
+        }
+        return [];
+    } catch (e) {
+        console.error('[DramaFull] Search failed:', e.message);
+        return [];
+    }
+}
+
+/**
+ * Get streams for a specific episode
+ */
+async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
+    try {
+        let mediaInfo;
+        if (typeof tmdbId === 'string' && isNaN(tmdbId)) {
+            mediaInfo = { title: tmdbId };
+        } else {
+            mediaInfo = await getTMDBDetails(tmdbId, mediaType);
+        }
+
+        if (!mediaInfo?.title) {
+            console.error('[DramaFull] No media info found for:', tmdbId);
+            // Fallback: If tmdbId is a string, use it as the title anyway
+            if (typeof tmdbId === 'string') {
+                console.log(`[DramaFull] Using tmdbId string "${tmdbId}" as fallback title`);
+                mediaInfo = { title: tmdbId };
+            } else {
+                return [];
+            }
+        }
+
+        console.log(`[DramaFull] Searching for: ${mediaInfo.title}`);
+        let searchResults = await search(mediaInfo.title);
+
+        // Fallback: If no results and title has special chars or is long, try a simplified version
+        if (searchResults.length === 0 && mediaInfo.title.includes(':')) {
+            const simplified = mediaInfo.title.split(':')[0].trim();
+            console.log(`[DramaFull] No results for full title, trying: ${simplified}`);
+            searchResults = await search(simplified);
+        }
+
+        if (searchResults.length === 0) {
+            console.log('[DramaFull] No search results found.');
+            return [];
+        }
+
+        // Find best match using TMDB ID first, then scoring
+        let bestMatch = null;
+        let maxScore = 0;
+
+        // Try exact TMDB ID match first
+        const tmdbIdNum = parseInt(tmdbId);
+        if (!isNaN(tmdbIdNum)) {
+            bestMatch = searchResults.find(r => r.themoviedb_id === tmdbIdNum);
+            if (bestMatch) {
+                console.log(`[DramaFull] Exact TMDB ID match found: ${bestMatch.name}`);
+                maxScore = 1.0;
+            }
+        }
+
+        if (!bestMatch) {
+            for (const res of searchResults) {
+                let score = calculateSimilarity(mediaInfo.title, res.name);
+
+                // Boost for year match if available
+                if (mediaInfo.year && res.name.includes(mediaInfo.year)) {
+                    score += 0.2; // Boost for matching year
+                    console.log(`[DramaFull] Year match boost for "${res.name}" (+0.2)`);
+                } else if (mediaInfo.year && !res.name.includes(mediaInfo.year) && res.name.match(/\(\d{4}\)/)) {
+                    // Penalize if it has a year BUT it's the wrong year
+                    score -= 0.1;
+                }
+
+                console.log(`[DramaFull] Score for "${res.name}": ${score.toFixed(2)}`);
+
+                if (score > maxScore) {
+                    maxScore = score;
+                    bestMatch = res;
+                }
+            }
+        }
+
+        if (!bestMatch || maxScore < 0.3) {
+            console.warn(`[DramaFull] No good match found (Max score: ${maxScore.toFixed(2)})`);
+            return [];
+        }
+
+        const filmSlug = bestMatch.slug;
+        const filmTitle = bestMatch.name;
+        console.log(`[DramaFull] Matched drama: ${filmTitle} (Slug: ${filmSlug}) Score: ${maxScore.toFixed(2)}`);
+
+        // Get Film Page to find episodes
+        const filmUrl = `${DRAMAFULL_BASE}/film/${filmSlug}`;
+        console.log(`[DramaFull] Fetching film page: ${filmUrl}`);
+        const filmPageResponse = await axios.get(filmUrl, { headers: HEADERS, timeout: 10000 });
+        const $ = cheerio.load(filmPageResponse.data);
+
+        const targetEpNumber = mediaType === 'tv' && episode ? episode : 1;
+        let watchUrl = '';
+
+        // Extract episode links
+        // Extract episode links
+        $('.episode-item a').each((i, el) => {
+            const $el = $(el);
+            const epText = $el.text().trim();
+            const epTitle = $el.attr('title') || '';
+
+            // Check text content first
+            const textMatch = epText.match(/(\d+)/);
+            if (textMatch && parseInt(textMatch[1]) === targetEpNumber) {
+                watchUrl = $el.attr('href');
+                return false;
+            }
+
+            // Check title attribute (e.g., "Episode 2")
+            const titleMatch = epTitle.match(/Episode\s*(\d+)/i);
+            if (titleMatch && parseInt(titleMatch[1]) === targetEpNumber) {
+                watchUrl = $el.attr('href');
+                return false;
+            }
+        });
+
+        // Fallback for movies or single episodes: Use the "Watch now" button or "Latest" link
+        if (!watchUrl) {
+            watchUrl = $('.btn-play').attr('href') || $('.last-episode a').attr('href');
+            // If it's a movie and we found a link, use it
+            if (watchUrl && mediaType === 'movie') {
+                console.log(`[DramaFull] Using movie watch link: ${watchUrl}`);
+            } else if (watchUrl && targetEpNumber === 1) {
+                console.log(`[DramaFull] Using fallback watch link for Ep 1: ${watchUrl}`);
+            } else {
+                watchUrl = '';
+            }
+        }
+
+        if (!watchUrl) {
+            console.warn(`[DramaFull] Episode ${targetEpNumber} not found for ${filmSlug}`);
+            return [];
+        }
+
+        if (!watchUrl.startsWith('http')) {
+            watchUrl = DRAMAFULL_BASE + watchUrl;
+        }
+
+        console.log(`[DramaFull] Found watch URL: ${watchUrl}`);
+
+        // Fetch Watch Page to get signedUrl
+        const watchPageResponse = await axios.get(watchUrl, { headers: HEADERS, timeout: 10000 });
+        const watchHtml = watchPageResponse.data;
+
+        // Extract signedUrl using regex
+        const signedUrlMatch = watchHtml.match(/window\.signedUrl\s*=\s*"(.*?)"/);
+        if (!signedUrlMatch) {
+            console.error('[DramaFull] Failed to extract signedUrl from watch page');
+            return [];
+        }
+
+        let signedUrl = signedUrlMatch[1].replace(/\\\//g, '/');
+        console.log(`[DramaFull] Found signedUrl: ${signedUrl}`);
+
+        // Fetch signedUrl to get video sources
+        const linkResponse = await axios.get(signedUrl, { headers: HEADERS, timeout: 10000 });
+        const linkData = linkResponse.data;
+
+        if (!linkData.success || !linkData.video_source) {
+            console.error('[DramaFull] Failed to get link data or no video sources');
+            return [];
+        }
+
+        const streams = [];
+        const sources = linkData.video_source;
+        const subtitles = [];
+
+        // Handle subtitles if present
+        if (linkData.sub) {
+            for (const quality in linkData.sub) {
+                const subList = linkData.sub[quality];
+                if (Array.isArray(subList)) {
+                    subList.forEach(subPath => {
+                        let subUrl = subPath;
+                        if (!subUrl.startsWith('http')) {
+                            subUrl = DRAMAFULL_BASE + subUrl;
+                        }
+                        subtitles.push({
+                            url: subUrl,
+                            language: 'English' // Usually English, but might need better detection
+                        });
+                    });
+                }
+            }
+        }
+
+        for (const quality in sources) {
+            const videoUrl = sources[quality];
+            const streamTitle = formatTitle(
+                filmTitle,
+                quality + 'p',
+                season,
+                episode,
+                subtitles.length > 0 ? `${subtitles.length} Subs` : ''
+            );
+
+            streams.push({
+                name: "DramaFull",
+                title: streamTitle,
+                url: videoUrl,
+                quality: quality + 'p',
+                subtitles: subtitles,
+                type: videoUrl.includes('.m3u8') ? 'hls' : 'mp4',
+                headers: {
+                    ...HEADERS,
+                    'Referer': watchUrl
+                },
+                provider: "DramaFull"
+            });
+        }
+
+        return streams;
+
+    } catch (e) {
+        console.error('[DramaFull] getStreams failed:', e.message);
+        return [];
+    }
+}
+
+module.exports = { getStreams };
