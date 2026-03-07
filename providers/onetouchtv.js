@@ -1,82 +1,113 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 
+const PROVIDER_NAME = "AsiaFlix";
 const BASE_URL = "https://asiaflix.net";
 
-// Function to search for movies/shows
-async function search(query) {
+async function search(title) {
     try {
-        const response = await axios.get(`${BASE_URL}/search?q=${encodeURIComponent(query)}`);
-        const $ = cheerio.load(response.data);
+        const res = await fetch(`${BASE_URL}/search?q=${encodeURIComponent(title)}`);
+        const html = await res.text();
+        const $ = cheerio.load(html);
+
         let results = [];
 
-        $(".film_list-wrap .flw-item").each((i, element) => {
-            let title = $(element).find(".film-detail a").text().trim();
-            let url = BASE_URL + $(element).find(".film-detail a").attr("href");
-            let poster = $(element).find(".film-poster img").attr("src");
+        $(".film_list-wrap .flw-item").each((i, el) => {
+            const name = $(el).find(".film-detail a").text().trim();
+            const url = BASE_URL + $(el).find(".film-detail a").attr("href");
 
-            results.push({ title, url, poster });
+            results.push({
+                title: name,
+                url
+            });
         });
 
         return results;
-    } catch (error) {
-        console.error("Search Error:", error);
+
+    } catch (err) {
+        console.log(PROVIDER_NAME, "search error", err);
         return [];
     }
 }
 
-// Function to get movie/show details
-async function getDetails(url) {
+async function getEpisodePage(url, season, episode) {
     try {
-        const response = await axios.get(url);
-        const $ = cheerio.load(response.data);
+        const res = await fetch(url);
+        const html = await res.text();
+        const $ = cheerio.load(html);
 
-        let title = $(".film-name").text().trim();
-        let description = $(".description").text().trim();
-        let poster = $(".film-poster img").attr("src");
+        let epUrl = null;
 
-        let episodes = [];
-        $(".episodes-list a").each((i, element) => {
-            let epTitle = $(element).text().trim();
-            let epUrl = BASE_URL + $(element).attr("href");
-            episodes.push({ epTitle, epUrl });
+        $(".episodes-list a").each((i, el) => {
+            const epNum = i + 1;
+
+            if (epNum === episode) {
+                epUrl = BASE_URL + $(el).attr("href");
+            }
         });
 
-        return { title, description, poster, episodes };
-    } catch (error) {
-        console.error("Details Error:", error);
+        return epUrl;
+
+    } catch {
         return null;
     }
 }
 
-// Function to extract streaming link
-async function getStreamUrl(episodeUrl) {
+async function extractIframe(url) {
     try {
-        const response = await axios.get(episodeUrl);
-        const $ = cheerio.load(response.data);
+        const res = await fetch(url);
+        const html = await res.text();
+        const $ = cheerio.load(html);
 
-        let iframeSrc = $("iframe").attr("src");
-        return iframeSrc ? iframeSrc : "Streaming link not found";
-    } catch (error) {
-        console.error("Stream URL Error:", error);
+        let iframe = $("iframe").attr("src");
+
+        return iframe || null;
+
+    } catch {
         return null;
     }
 }
 
-// Example usage (for testing)
-(async () => {
-    let searchResults = await search("The King");
-    console.log("Search Results:", searchResults);
+export async function getStreams(tmdbId, type, season, episode) {
 
-    if (searchResults.length > 0) {
-        let details = await getDetails(searchResults[0].url);
-        console.log("Details:", details);
+    try {
 
-        if (details.episodes.length > 0) {
-            let streamUrl = await getStreamUrl(details.episodes[0].epUrl);
-            console.log("Streaming URL:", streamUrl);
+        // Get TMDB title
+        const tmdb = await fetch(
+            `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=439c478a771f35c05022f9feabcca01c`
+        );
+
+        const data = await tmdb.json();
+        const title = type === "movie" ? data.title : data.name;
+
+        const results = await search(title);
+
+        if (!results.length) return [];
+
+        const page = results[0].url;
+
+        let episodePage = page;
+
+        if (type === "tv") {
+            episodePage = await getEpisodePage(page, season, episode);
         }
-    }
-})();
 
-module.exports = { search, getDetails, getStreamUrl };
+        if (!episodePage) return [];
+
+        const iframe = await extractIframe(episodePage);
+
+        if (!iframe) return [];
+
+        return [
+            {
+                name: PROVIDER_NAME,
+                url: iframe,
+                type: "embed"
+            }
+        ];
+
+    } catch (err) {
+        console.log(PROVIDER_NAME, "error", err);
+        return [];
+    }
+}
