@@ -80,6 +80,20 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "animekai",
+      "name": "AnimeKai",
+      "description": "Auto-generated description for AnimeKai",
+      "version": "1.0.0",
+      "author": "Michat88",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/animekai.js",
+      "enabled": true,
+      "limited": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/SRgFMLJM/animekai.png",
+      "contentLanguage": ["en"]
+    },
+    {
       "id": "castle",
       "name": "Castle",
       "description": "Auto-generated description for Castle",
