@@ -1,138 +1,181 @@
-// Desene Dublate RO Provider pentru Nuvio
-// Sursa: deseneledublate.com - desene animate dublate in romana
+const axios = require("axios");
+const crypto = require("crypto");
 
-function cleanTitle(title) {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, "-")
-    .trim();
+const API = "https://api3.devcorp.me";
+
+const keyHex = Buffer.from(
+"Njk2ZDM3MzI2MzY4NjE3MjUwNjE3MzczNzc2ZjcyNjQ2ZjY2NjQ0OTZlNjk3NDU2NjU2Mzc0NmY3MjUzNzQ2ZA==",
+"base64"
+).toString();
+
+const ivHex = Buffer.from(
+"Njk2ZDM3MzI2MzY4NjE3MjUwNjE3MzczNzc2ZjcyNjQ=",
+"base64"
+).toString();
+
+function hexToBytes(hex){
+return Buffer.from(hex.match(/.{1,2}/g).map(b=>parseInt(b,16)));
 }
 
-function getStreams(tmdbId, mediaType, season, episode) {
-  // Intai luam titlul filmului/serialului din TMDB
-  var tmdbUrl =
-    "https://api.themoviedb.org/3/" +
-    (mediaType === "movie" ? "movie" : "tv") +
-    "/" +
-    tmdbId +
-    "?api_key=c9b3694ab9f79b7f2f14f86bc0d5c93d&language=ro-RO";
+const key = hexToBytes(keyHex);
+const iv = hexToBytes(ivHex);
 
-  return fetch(tmdbUrl)
-    .then(function (response) {
-      return response.json();
-    })
-    .then(function (tmdbData) {
-      var title = tmdbData.title || tmdbData.name || "";
-      var originalTitle = tmdbData.original_title || tmdbData.original_name || "";
-      var slug = cleanTitle(title) || cleanTitle(originalTitle);
-
-      // Cautam pe deseneledublate.com
-      var searchUrl =
-        "https://deseneledublate.com/?s=" + encodeURIComponent(title);
-
-      return fetch(searchUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "ro-RO,ro;q=0.9",
-        },
-      }).then(function (response) {
-        return response.text();
-      }).then(function (html) {
-        var streams = [];
-
-        // Extragem linkuri din pagina de search
-        var linkRegex = /href="(https:\/\/deseneledublate\.com\/[^"]+)"/g;
-        var match;
-        var foundLinks = [];
-
-        while ((match = linkRegex.exec(html)) !== null) {
-          var url = match[1];
-          if (
-            url.includes(slug) ||
-            url.toLowerCase().includes(cleanTitle(title))
-          ) {
-            if (foundLinks.indexOf(url) === -1) {
-              foundLinks.push(url);
-            }
-          }
-        }
-
-        if (foundLinks.length === 0) {
-          // Incercam URL direct dupa slug
-          foundLinks.push("https://deseneledublate.com/" + slug + "/");
-        }
-
-        // Luam primul rezultat si extragem stream-ul
-        return fetch(foundLinks[0], {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            Referer: "https://deseneledublate.com/",
-          },
-        }).then(function (pageResponse) {
-          return pageResponse.text();
-        }).then(function (pageHtml) {
-          // Cautam iframe sau surse video
-          var iframeRegex = /<iframe[^>]+src="([^"]+)"/gi;
-          var mp4Regex = /(?:file|src)["']?\s*[:=]\s*["']([^"']+\.(?:mp4|m3u8))/gi;
-          var sourceRegex = /<source[^>]+src="([^"]+)"/gi;
-
-          var videoUrls = [];
-
-          var m;
-          while ((m = mp4Regex.exec(pageHtml)) !== null) {
-            if (videoUrls.indexOf(m[1]) === -1) {
-              videoUrls.push(m[1]);
-            }
-          }
-          while ((m = sourceRegex.exec(pageHtml)) !== null) {
-            if (videoUrls.indexOf(m[1]) === -1) {
-              videoUrls.push(m[1]);
-            }
-          }
-
-          if (videoUrls.length > 0) {
-            videoUrls.forEach(function (url, index) {
-              streams.push({
-                name: "Desene Dublate RO",
-                title:
-                  "Desene Dublate RO | " +
-                  (url.includes("m3u8") ? "HLS" : "MP4") +
-                  (index > 0 ? " #" + (index + 1) : ""),
-                url: url,
-                quality: "SD",
-                headers: {
-                  Referer: "https://deseneledublate.com/",
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                },
-              });
-            });
-          } else {
-            // Daca nu gasim stream direct, returnam pagina cu external player
-            streams.push({
-              name: "Desene Dublate RO",
-              title: "Desene Dublate RO | " + title,
-              url: foundLinks[0],
-              quality: "SD",
-              headers: {
-                Referer: "https://deseneledublate.com/",
-              },
-              supportsExternalPlayer: true,
-            });
-          }
-
-          return streams;
-        });
-      });
-    })
-    .catch(function (error) {
-      console.error("[DeseneRO] Error:", error.message);
-      return [];
-    });
+function normalize(input){
+return input
+.replace(/-\_\./g,"/")
+.replace(/@/g,"+")
+.replace(/\s+/g,"");
 }
 
-module.exports = { getStreams };
+function decryptString(input){
+
+const normalized = normalize(input);
+
+let base64 = normalized;
+const pad = base64.length % 4;
+if(pad !== 0){
+base64 += "=".repeat(4-pad);
+}
+
+const encrypted = Buffer.from(base64,"base64");
+
+const decipher = crypto.createDecipheriv("aes-256-cbc",key,iv);
+
+let decrypted = decipher.update(encrypted);
+decrypted = Buffer.concat([decrypted,decipher.final()]);
+
+const text = decrypted.toString();
+
+const json = JSON.parse(text);
+
+return json.result;
+}
+
+async function search(query){
+
+try{
+
+const url = `${API}/vod/search?page=1&keyword=${encodeURIComponent(query)}`;
+
+const res = await axios.get(url,{
+headers:{referer:`${API}/`}
+});
+
+const decrypted = decryptString(res.data);
+
+const results = JSON.parse(decrypted);
+
+return results.map(r => ({
+title: r.title,
+tmdb: r.id,
+year: r.year,
+poster: r.image,
+type: r.type
+}));
+
+}catch(e){
+
+return [];
+
+}
+
+}
+
+async function getMediaInfo(id){
+
+try{
+
+const url = `${API}/vod/${id}/detail`;
+
+const res = await axios.get(url);
+
+const decrypted = decryptString(res.data);
+
+const data = JSON.parse(decrypted);
+
+const episodes = [];
+
+if(data.episodes){
+
+for(const ep of data.episodes){
+
+episodes.push({
+season:1,
+episode:parseInt(ep.episode) || 1,
+id:ep.identifier,
+play:ep.playId
+});
+
+}
+
+}
+
+return {
+title:data.title,
+poster:data.image,
+description:data.description,
+episodes
+};
+
+}catch(e){
+
+return null;
+
+}
+
+}
+
+async function getStreams(tmdbId,type,season,episode){
+
+try{
+
+const info = await getMediaInfo(tmdbId);
+
+if(!info || !info.episodes) return [];
+
+const ep = info.episodes.find(e=>e.episode===episode);
+
+if(!ep) return [];
+
+const url = `${API}/vod/${ep.id}/episode/${ep.play}`;
+
+const res = await axios.get(url);
+
+const decrypted = decryptString(res.data);
+
+const data = JSON.parse(decrypted);
+
+const streams = [];
+
+if(data.sources){
+
+for(const src of data.sources){
+
+streams.push({
+url:src.url,
+quality:src.quality || "auto",
+name:src.name || "Server",
+headers:src.headers || {}
+});
+
+}
+
+}
+
+return streams;
+
+}catch(e){
+
+return [];
+
+}
+
+}
+
+module.exports = {
+name:"OneTouchTV",
+domains:["api3.devcorp.me"],
+search,
+getMediaInfo,
+getStreams
+};
