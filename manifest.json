@@ -211,6 +211,19 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "fullhd",
+      "name": "FullHD",
+      "description": "Auto-generated description for fullhd",
+      "version": "1.0.0",
+      "author": "Mooncrown",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/fullhd.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en", "tk"] 
+    },
+    {
       "id": "kisskh",
       "name": "Kisskh",
       "description": "Asian Drama & Anime streaming",
