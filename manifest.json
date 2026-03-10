@@ -211,6 +211,19 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "kartoons",
+      "name": "Kartoons",
+      "description": "Cartoons & Anime streaming",
+      "version": "1.0.0",
+      "author": "",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/kartoons.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en"]
+    },
+    {
       "id": "kisskh",
       "name": "Kisskh",
       "description": "Asian Drama & Anime streaming",
