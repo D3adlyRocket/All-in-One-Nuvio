@@ -494,7 +494,7 @@ function processPrimeBoxResponse(data, serverLabel, serverName) {
                             quality: normalizedQuality,
                             type: 'VIDEO',
                             headers: WORKING_HEADERS,
-                            referer: 'https://xprime.tv'
+                            referer: 'https://xprime.stream'
                         });
                     }
                 });
@@ -546,7 +546,7 @@ function processOtherServerResponse(data, serverLabel, serverName) {
                         size: sizeStr,
                         type: 'VIDEO',
                         headers: WORKING_HEADERS,
-                        referer: 'https://xprime.tv'
+                        referer: 'https://xprime.stream'
                     });
                 }
             });
@@ -572,7 +572,7 @@ function processOtherServerResponse(data, serverLabel, serverName) {
                 quality: quality,
                 type: 'M3U8',
                 headers: WORKING_HEADERS,
-                referer: 'https://xprime.tv'
+                referer: 'https://xprime.stream'
             });
         }
     } catch (error) {
@@ -703,9 +703,9 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                 let serverUrl;
                 if (server.name === 'rage') {
                     if (type === 'tv' && season && episode) {
-                        serverUrl = `https://backend.xprime.tv/rage?id=${encodeURIComponent(tmdbId)}&season=${encodeURIComponent(season)}&episode=${encodeURIComponent(episode)}&turnstile=${encodeURIComponent(turnstileToken)}`;
+                        serverUrl = `https://backend.xprime.stream/rage?id=${encodeURIComponent(tmdbId)}&season=${encodeURIComponent(season)}&episode=${encodeURIComponent(episode)}&turnstile=${encodeURIComponent(turnstileToken)}`;
                     } else {
-                        serverUrl = `https://backend.xprime.tv/rage?id=${encodeURIComponent(tmdbId)}&turnstile=${encodeURIComponent(turnstileToken)}`;
+                        serverUrl = `https://backend.xprime.stream/rage?id=${encodeURIComponent(tmdbId)}&turnstile=${encodeURIComponent(turnstileToken)}`;
                     }
                 } else {
                     const queryParams = buildQueryParams(server.name, title, year, imdbId, season, episode);
@@ -718,8 +718,8 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
                         'Connection': 'keep-alive',
-                        'Origin': 'https://xprime.tv',
-                        'Referer': 'https://xprime.tv/'
+                        'Origin': 'https://xprime.stream',
+                        'Referer': 'https://xprime.stream/'
                     }
                 }).then(function(response) {
                     return response.text().then(function(responseText) {
