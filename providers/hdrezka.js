@@ -1,924 +1,1069 @@
-// DVDPlay scraper for Nuvio
-// Scrapes content from dvdplay.forum with HubCloud link extraction
+// MoviesMod Scraper for Nuvio Local Scrapers
+// React Native compatible version with Cheerio support
+
+// Import cheerio-without-node-native for React Native
+const cheerio = require('cheerio-without-node-native');
+
+console.log('[MoviesMod] Using cheerio-without-node-native for DOM parsing');
+
+// Escape regex special characters
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 // Constants
-const TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c"; // This will be replaced by Nuvio
-const BASE_URL = 'https://dvdplay.diy';
+const TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
+const FALLBACK_DOMAIN = 'https://moviesmod.pink';
+const DOMAIN_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
-// Temporarily disable URL validation for faster results
-global.URL_VALIDATION_ENABLED = true;
+// Global variables for domain caching
+let moviesModDomain = FALLBACK_DOMAIN;
+let domainCacheTimestamp = 0;
 
-// === HubCloud Extractor Functions (embedded) ===
+// Fetch latest domain from GitHub
+async function getMoviesModDomain() {
+  const now = Date.now();
+  if (now - domainCacheTimestamp < DOMAIN_CACHE_TTL) {
+    return moviesModDomain;
+  }
 
-// Utility functions
-function getBaseUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        return `${urlObj.protocol}//${urlObj.host}`;
-    } catch (e) {
-        return '';
-    }
-}
-
-// Base64 and encoding utilities (from 4KHDHub)
-function base64Decode(str) {
-    try {
-        // Convert base64 -> binary string -> UTF-8
-        // escape/unescape is deprecated but works in RN environments for this use case
-        return decodeURIComponent(escape(atob(str)));
-    } catch (e) {
-        return '';
-    }
-}
-
-function base64Encode(str) {
-    try {
-        return btoa(unescape(encodeURIComponent(str)));
-    } catch (e) {
-        return '';
-    }
-}
-
-function rot13(str) {
-    return (str || '').replace(/[A-Za-z]/g, function (char) {
-        var start = char <= 'Z' ? 65 : 97;
-        return String.fromCharCode(((char.charCodeAt(0) - start + 13) % 26) + start);
+  try {
+    console.log('[MoviesMod] Fetching latest domain...');
+    const response = await fetch('https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json', {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
     });
-}
 
-// Advanced title normalization (from 4KHDHub)
-function normalizeTitle(title) {
-    return (title || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-// String similarity calculation (from 4KHDHub)
-function calculateSimilarity(str1, str2) {
-    var s1 = normalizeTitle(str1);
-    var s2 = normalizeTitle(str2);
-    if (s1 === s2) return 1.0;
-    var len1 = s1.length;
-    var len2 = s2.length;
-    if (len1 === 0) return len2 === 0 ? 1.0 : 0.0;
-    if (len2 === 0) return 0.0;
-    var matrix = Array(len1 + 1).fill(null).map(function () { return Array(len2 + 1).fill(0); });
-    for (var i = 0; i <= len1; i++) matrix[i][0] = i;
-    for (var j = 0; j <= len2; j++) matrix[0][j] = j;
-    for (i = 1; i <= len1; i++) {
-        for (j = 1; j <= len2; j++) {
-            var cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
-            matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
-        }
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.moviesmod) {
+        moviesModDomain = data.moviesmod;
+        domainCacheTimestamp = now;
+        console.log(`[MoviesMod] Updated domain to: ${moviesModDomain}`);
+      }
     }
-    var maxLen = Math.max(len1, len2);
-    return (maxLen - matrix[len1][len2]) / maxLen;
+  } catch (error) {
+    console.error(`[MoviesMod] Failed to fetch latest domain: ${error.message}`);
+  }
+
+  return moviesModDomain;
 }
 
-function makeRequest(url, options = {}) {
-    return new Promise((resolve, reject) => {
-        const urlObj = new URL(url);
-        const fetchOptions = {
-            method: options.method || 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                ...options.headers
-            },
-            timeout: 30000
-        };
+// Helper function to make HTTP requests
+async function makeRequest(url, options = {}) {
+  const defaultHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Encoding': 'gzip, deflate',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1'
+  };
 
-        fetch(url, fetchOptions)
-            .then(response => {
-                if (options.allowRedirects === false && (response.status === 301 || response.status === 302 || response.status === 303 || response.status === 307 || response.status === 308)) {
-                    resolve({ statusCode: response.status, headers: Object.fromEntries(response.headers) });
-                    return;
-                }
-                
-                return response.text().then(data => {
-                    if (options.parseHTML && data) {
-                        const cheerio = require('cheerio-without-node-native');
-                        const $ = cheerio.load(data);
-                        resolve({ $: $, body: data, statusCode: response.status, headers: Object.fromEntries(response.headers) });
-                    } else {
-                        resolve({ body: data, statusCode: response.status, headers: Object.fromEntries(response.headers) });
-                    }
-                });
-            })
-            .catch(reject);
-    });
-}
-
-function getIndexQuality(str) {
-    const match = (str || '').match(/(\d{3,4})[pP]/);
-    return match ? parseInt(match[1]) : null; // Don't assume quality if not found
-}
-
-function decodeFilename(filename) {
-    if (!filename) return filename;
-    
-    try {
-        let decoded = filename;
-        
-        if (decoded.startsWith('UTF-8')) {
-            decoded = decoded.substring(5);
-        }
-        
-        decoded = decodeURIComponent(decoded);
-        
-        return decoded;
-    } catch (error) {
-        return filename;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers
     }
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  return response;
 }
 
-function cleanTitle(title) {
-    const decodedTitle = decodeFilename(title);
-    const parts = decodedTitle.split(/[.\-_]/);
-    
-    const qualityTags = ['WEBRip', 'WEB-DL', 'WEB', 'BluRay', 'HDRip', 'DVDRip', 'HDTV', 'CAM', 'TS', 'R5', 'DVDScr', 'BRRip', 'BDRip', 'DVD', 'PDTV', 'HD'];
-    const audioTags = ['AAC', 'AC3', 'DTS', 'MP3', 'FLAC', 'DD5', 'EAC3', 'Atmos'];
-    const subTags = ['ESub', 'ESubs', 'Subs', 'MultiSub', 'NoSub', 'EnglishSub', 'HindiSub'];
-    const codecTags = ['x264', 'x265', 'H264', 'HEVC', 'AVC'];
-    
-    const startIndex = parts.findIndex(part => 
-        qualityTags.some(tag => part.toLowerCase().includes(tag.toLowerCase()))
-    );
-    
-    const endIndex = parts.map((part, index) => {
-        const hasTag = [...subTags, ...audioTags, ...codecTags].some(tag => 
-            part.toLowerCase().includes(tag.toLowerCase())
-        );
-        return hasTag ? index : -1;
-    }).filter(index => index !== -1).pop() || -1;
-    
-    if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {
-        return parts.slice(startIndex, endIndex + 1).join('.');
-    } else if (startIndex !== -1) {
-        return parts.slice(startIndex).join('.');
-    } else {
-        return parts.slice(-3).join('.');
-    }
-}
+// Helper function to extract quality from text
+function extractQuality(text) {
+  if (!text) return 'Unknown';
 
-function getFilenameFromUrl(url) {
-    return new Promise((resolve) => {
-        try {
-            fetch(url, { method: 'HEAD', timeout: 10000 })
-                .then(response => {
-                    const contentDisposition = response.headers.get('content-disposition');
-                    let filename = null;
-                    
-                    if (contentDisposition) {
-                        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i);
-                        if (filenameMatch && filenameMatch[1]) {
-                            filename = filenameMatch[1].replace(/["']/g, '');
-                        }
-                    }
-                    
-                    if (!filename) {
-                        const urlObj = new URL(url);
-                        const pathParts = urlObj.pathname.split('/');
-                        filename = pathParts[pathParts.length - 1];
-                        if (filename && filename.includes('.')) {
-                            filename = filename.replace(/\.[^.]+$/, '');
-                        }
-                    }
-                    
-                    const decodedFilename = decodeFilename(filename);
-                    resolve(decodedFilename || null);
-                })
-                .catch(() => resolve(null));
-        } catch (error) {
-            resolve(null);
-        }
-    });
-}
+  const qualityMatch = text.match(/(480p|720p|1080p|2160p|4k)/i);
+  if (qualityMatch) {
+    return qualityMatch[1];
+  }
 
-function extractHubCloudLinks(url, referer = 'HubCloud') {
-    var origin;
-    try { origin = new URL(url).origin; } catch (e) { origin = ''; }
+  const cleanMatch = text.match(/(480p|720p|1080p|2160p|4k)[^)]*\)/i);
+  if (cleanMatch) {
+    return cleanMatch[0];
+  }
 
-    // Helper function for absolute URL resolution
-    function toAbsolute(href, base) {
-        try {
-            return new URL(href, base).href;
-        } catch (e) {
-            return href;
-        }
-    }
-    
-    return makeRequest(url, { parseHTML: true })
-        .then(response => {
-            const $ = response.$;
-            
-            var href;
-            if (url.indexOf('hubcloud.php') !== -1) {
-                href = url;
-            } else {
-                // Check for token-based HubCloud URLs (newer format)
-                var tokenMatch = url.match(/\/video\/([^\/\?]+)(\?token=([^&\s]+))?/);
-                if (tokenMatch) {
-                    var videoId = tokenMatch[1];
-                    var token = tokenMatch[3];
-                    if (token) {
-                        // Use the token-based URL format
-                        href = origin + '/video/' + videoId + '?token=' + token;
-                    } else {
-                        // Try to find token in the page
-                        var tokenFromPage = $.html().match(/token=([^"'\s&]+)/);
-                        if (tokenFromPage) {
-                            href = origin + '/video/' + videoId + '?token=' + tokenFromPage[1];
-                        } else {
-                            href = url; // Use original URL as fallback
-                        }
-                    }
-                } else {
-                    // Traditional approach for older HubCloud formats
-                    var rawHref = $('#download').attr('href') || $('a[href*="hubcloud.php"]').attr('href') || $('.download-btn').attr('href') || $('a[href*="download"]').attr('href');
-                    if (!rawHref) throw new Error('Download element not found');
-                    href = toAbsolute(rawHref, origin);
-                }
-            }
-            
-            return makeRequest(href, { parseHTML: true }).then(function(secondResponse) {
-                return { firstResponse: response, secondResponse: secondResponse, href: href };
-            });
-        })
-        .then(response => {
-            const $$ = response.secondResponse.$; // Use $$ for the second cheerio instance like 4KHDHub
-            const href = response.href;
-
-    // Helper function to resolve intermediate HubCloud URLs (.fans/?id= and .workers.dev/?id=)
-    function resolveHubCloudUrl(url) {
-        console.log(`[DVDPlay] Resolving HubCloud URL: ${url.substring(0, 50)}...`);
-
-        // If it's already an R2 Cloudflare URL, it's already resolved
-        if (url.includes('r2.cloudflarestorage.com')) {
-            console.log(`[DVDPlay] URL already resolved (R2): ${url.substring(0, 50)}...`);
-            return Promise.resolve(url);
-        }
-
-        // Extract the actual download URL from 360news4u.net/dl.php?link= URLs FIRST
-        if (url.includes('360news4u.net/dl.php?link=')) {
-            console.log(`[DVDPlay] 🔍 Processing 360news4u.net URL: ${url.substring(0, 100)}...`);
-            const linkMatch = url.match(/360news4u\.net\/dl\.php\?link=([^&\s]+)/);
-            console.log(`[DVDPlay] 🔍 Regex match result:`, linkMatch);
-
-            if (linkMatch && linkMatch[1]) {
-                const actualUrl = decodeURIComponent(linkMatch[1]);
-                console.log(`[DVDPlay] ✅ Extracted Google Drive URL from 360news4u.net: ${actualUrl.substring(0, 80)}...`);
-                return Promise.resolve(actualUrl);
-            } else {
-                console.log(`[DVDPlay] ❌ Failed to extract URL from 360news4u.net link`);
-                console.log(`[DVDPlay] ❌ Full URL for debugging: ${url}`);
-            }
-        }
-
-        // If it's a direct Google Drive download URL, it might be final
-        if (url.includes('video-downloads.googleusercontent.com')) {
-            console.log(`[DVDPlay] Google Drive download URL found: ${url.substring(0, 50)}...`);
-            return Promise.resolve(url);
-        }
-
-        return fetch(url, {
-            method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            },
-            redirect: 'manual' // Don't follow redirects automatically
-        }).then(response => {
-            if (response.status >= 300 && response.status < 400) {
-                // Follow redirect manually
-                const location = response.headers.get('location');
-                if (location) {
-                    console.log(`[DVDPlay] Following redirect to: ${location.substring(0, 50)}...`);
-                    // Recursively resolve the redirect URL
-                    return resolveHubCloudUrl(location);
-                }
-            }
-
-            // If no redirect, check if this is already a direct file URL
-            if (response.status === 200 && response.headers.get('content-type')?.includes('video/')) {
-                console.log(`[DVDPlay] Direct file URL found: ${url.substring(0, 50)}...`);
-                return url;
-            }
-
-            // Check if it's a direct S3/R2 URL in the response
-            if (response.status === 200) {
-                console.log(`[DVDPlay] Checking for direct URL in response...`);
-                return response.text().then(text => {
-                    // Look for direct download URLs in the response
-                    const directUrlMatch = text.match(/(https?:\/\/[^"'\s]+\.r2\.cloudflarestorage\.com[^"'\s]*)/);
-                    if (directUrlMatch) {
-                        console.log(`[DVDPlay] Found direct URL in response: ${directUrlMatch[1].substring(0, 50)}...`);
-                        return directUrlMatch[1];
-                    }
-
-                    // Look for other direct download patterns
-                    const otherDirectMatch = text.match(/(https?:\/\/[^"'\s]+\/[^"'\s]*\.(mkv|mp4|avi|m4v)[^"'\s]*)/i);
-                    if (otherDirectMatch) {
-                        console.log(`[DVDPlay] Found direct file URL: ${otherDirectMatch[1].substring(0, 50)}...`);
-                        return otherDirectMatch[1];
-                    }
-
-                    // Return original URL if we can't find a direct URL
-                    console.log(`[DVDPlay] No direct URL found, returning original`);
-                    return url;
-                });
-            }
-
-            // Return original URL if we can't resolve it
-            console.log(`[DVDPlay] Could not resolve URL, returning original`);
-            return url;
-        }).catch(error => {
-            console.log(`[DVDPlay] Error resolving URL: ${error.message}`);
-            return url;
-        });
-    }
-
-    function buildTask(buttonText, buttonLink, headerDetails, size, quality) {
-        const qualityLabel = quality ? (' - ' + quality + 'p') : ' - Unknown';
-
-        // Pixeldrain normalization (from 4KHDHub)
-        const pd = buttonLink.match(/pixeldrain\.(?:net|dev)\/u\/([a-zA-Z0-9]+)/);
-        if (pd && pd[1]) buttonLink = 'https://pixeldrain.net/api/file/' + pd[1];
-
-        // Handle intermediate HubCloud URLs (.fans/?id=, .workers.dev/?id=, and Google Drive redirects)
-        if (buttonLink.includes('.fans/?id=') || buttonLink.includes('.workers.dev/?id=') || buttonLink.includes('360news4u.net/dl.php')) {
-            return resolveHubCloudUrl(buttonLink)
-                .then(resolvedUrl => {
-                    // If resolution failed and we still have an intermediate URL, try one more time
-                    if (resolvedUrl.includes('.workers.dev/?id=') &&
-                        !resolvedUrl.includes('r2.cloudflarestorage.com') &&
-                        !resolvedUrl.includes('video-downloads.googleusercontent.com') &&
-                        !resolvedUrl.includes('360news4u.net/dl.php')) {
-                        console.log(`[DVDPlay] Second attempt to resolve: ${resolvedUrl.substring(0, 50)}...`);
-                        return resolveHubCloudUrl(resolvedUrl);
-                    }
-                    return resolvedUrl;
-                })
-                .then(resolvedUrl => {
-                    return getFilenameFromUrl(resolvedUrl)
-                            .then(actualFilename => {
-                                const displayFilename = actualFilename || headerDetails || 'Unknown';
-                                const titleParts = [];
-                                if (displayFilename) titleParts.push(displayFilename);
-                                if (size) titleParts.push(size);
-                                const finalTitle = titleParts.join('\n');
-                                
-                            let name;
-                            if (buttonText.includes('FSL Server')) name = 'DVDPlay - FSL Server' + qualityLabel;
-                            else if (buttonText.includes('S3 Server')) name = 'DVDPlay - S3 Server' + qualityLabel;
-                            else if (/pixeldra/i.test(buttonText) || /pixeldra/i.test(buttonLink)) name = 'DVDPlay - Pixeldrain' + qualityLabel;
-                            else if (buttonText.includes('Download File')) name = 'DVDPlay - HubCloud' + qualityLabel;
-                            else name = 'DVDPlay - HubCloud' + qualityLabel;
-
-                            return {
-                                name: name,
-                                    title: finalTitle,
-                                url: resolvedUrl,
-                                    quality: quality ? quality + 'p' : 'Unknown',
-                                size: size || null,
-                                fileName: actualFilename || null,
-                                    type: 'direct'
-                            };
-                            })
-                            .catch(() => {
-                                const displayFilename = headerDetails || 'Unknown';
-                                const titleParts = [];
-                                if (displayFilename) titleParts.push(displayFilename);
-                                if (size) titleParts.push(size);
-                                const finalTitle = titleParts.join('\n');
-                                
-                            const name = 'DVDPlay - HubCloud' + qualityLabel;
-                            return {
-                                name: name,
-                                    title: finalTitle,
-                                url: resolvedUrl,
-                                    quality: quality ? quality + 'p' : 'Unknown',
-                                size: size || null,
-                                fileName: null,
-                                    type: 'direct'
-                            };
-                                });
-                            });
-        }
-
-        return getFilenameFromUrl(buttonLink)
-                            .then(actualFilename => {
-                                const displayFilename = actualFilename || headerDetails || 'Unknown';
-                                const titleParts = [];
-                                if (displayFilename) titleParts.push(displayFilename);
-                                if (size) titleParts.push(size);
-                                const finalTitle = titleParts.join('\n');
-                                
-                let name;
-                if (buttonText.includes('FSL Server')) name = 'DVDPlay - FSL Server' + qualityLabel;
-                else if (buttonText.includes('S3 Server')) name = 'DVDPlay - S3 Server' + qualityLabel;
-                else if (/pixeldra/i.test(buttonText) || /pixeldra/i.test(buttonLink)) name = 'DVDPlay - Pixeldrain' + qualityLabel;
-                else if (buttonText.includes('Download File')) name = 'DVDPlay - HubCloud' + qualityLabel;
-                else name = 'DVDPlay - HubCloud' + qualityLabel;
-
-                return {
-                    name: name,
-                                    title: finalTitle,
-                    url: buttonLink,
-                                    quality: quality ? quality + 'p' : 'Unknown',
-                    size: size || null,
-                    fileName: actualFilename || null,
-                                    type: 'direct'
-                };
-                            })
-                            .catch(() => {
-                                const displayFilename = headerDetails || 'Unknown';
-                                const titleParts = [];
-                                if (displayFilename) titleParts.push(displayFilename);
-                                if (size) titleParts.push(size);
-                                const finalTitle = titleParts.join('\n');
-                                
-                const name = 'DVDPlay - HubCloud' + qualityLabel;
-                return {
-                    name: name,
-                                    title: finalTitle,
-                    url: buttonLink,
-                                    quality: quality ? quality + 'p' : 'Unknown',
-                    size: size || null,
-                    fileName: null,
-                                    type: 'direct'
-                };
-            });
-    }
-
-            // Iterate per card to capture per-quality sections (from 4KHDHub)
-            const tasks = [];
-            const cards = $$('.card');
-            if (cards.length > 0) {
-                cards.each(function (ci, card) {
-                    const $card = $$(card);
-                    const header = $card.find('div.card-header').text() || $$('div.card-header').first().text() || '';
-                    const size = $card.find('i#size').text() || $$('i#size').first().text() || '';
-                    const quality = getIndexQuality(header);
-                    const headerDetails = cleanTitle(header);
-
-                    let localBtns = $card.find('div.card-body h2 a.btn');
-                    if (localBtns.length === 0) localBtns = $card.find('a.btn, .btn, a[href]');
-
-                    localBtns.each(function (i, el) {
-                        const $btn = $$(el);
-                        const text = ($btn.text() || '').trim();
-                        let link = $btn.attr('href');
-
-                        if (!link) return;
-                        link = toAbsolute(link, href);
-
-                        // Only consider plausible buttons (from 4KHDHub)
-                        const isPlausible = /(hubcloud|hubdrive|pixeldrain|buzz|10gbps|workers\.dev|r2\.dev|download|api\/file)/i.test(link) ||
-                                          text.toLowerCase().includes('download');
-
-                        if (!isPlausible) return;
-
-                        tasks.push(buildTask(text, link, headerDetails, size, quality));
-                });
-            });
-            }
-
-            // Fallback: whole page buttons (from 4KHDHub)
-            if (tasks.length === 0) {
-                let buttons = $$.root().find('div.card-body h2 a.btn');
-                if (buttons.length === 0) {
-                    const altSelectors = ['a.btn', '.btn', 'a[href]'];
-                    for (const selector of altSelectors) {
-                        buttons = $$.root().find(selector);
-                        if (buttons.length > 0) break;
-                    }
-                }
-
-                const size = $$('i#size').first().text() || '';
-                const header = $$('div.card-header').first().text() || '';
-                const quality = getIndexQuality(header);
-                const headerDetails = cleanTitle(header);
-
-                buttons.each(function (i, el) {
-                    const $btn = $$(el);
-                    const text = ($btn.text() || '').trim();
-                    let link = $btn.attr('href');
-
-                    if (!link) return;
-                    link = toAbsolute(link, href);
-
-                    tasks.push(buildTask(text, link, headerDetails, size, quality));
-                });
-            }
-
-            if (tasks.length === 0) return [];
-            return Promise.all(tasks).then(arr => (arr || []).filter(x => !!x));
-        })
-        .catch(error => {
-            console.error(`[DVDPlay] HubCloud extraction error for ${url}:`, error.message);
-            return [];
-        });
-}
-
-// Advanced redirect resolution (from 4KHDHub)
-function getRedirectLinks(url) {
-    return makeRequest(url).then(function (res) { return res.body; }).then(function (html) {
-        var regex = /s\('o','([A-Za-z0-9+/=]+)'|ck\('_wp_http_\d+','([^']+)'/g;
-        var combined = '';
-        var m;
-        while ((m = regex.exec(html)) !== null) {
-            var val = m[1] || m[2];
-            if (val) combined += val;
-        }
-        try {
-            var decoded = base64Decode(rot13(base64Decode(base64Decode(combined))));
-            var obj = JSON.parse(decoded);
-            var encodedurl = base64Decode(obj.o || '').trim();
-            var data = base64Decode(obj.data || '').trim();
-            var blog = (obj.blog_url || '').trim();
-            if (encodedurl) return encodedurl;
-            if (blog && data) {
-                return makeRequest(blog + '?re=' + data).then(function (r) { return r.body; }).then(function (txt) { return (txt || '').trim(); }).catch(function () { return ''; });
-            }
-            return '';
-        } catch (e) {
-            return '';
-        }
-    }).catch(function () { return ''; });
-}
-
-// === End of HubCloud Extractor Functions ===
-
-// Helper function for HTTP requests with better error handling
-function makeHTTPRequest(url, options = {}) {
-    const defaultHeaders = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none'
-    };
-
-    return fetch(url, {
-        ...options,
-        headers: {
-            ...defaultHeaders,
-            ...options.headers
-        },
-        redirect: 'follow'
-    }).then(response => {
-        // Handle different status codes more gracefully
-        if (response.status === 500) {
-            console.log(`[DVDPlay] Server error (500) for ${url}, this might be temporary`);
-            throw new Error(`Server temporarily unavailable (HTTP 500)`);
-        }
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return response;
-    }).catch(error => {
-        console.error(`[DVDPlay] Request failed for ${url}: ${error.message}`);
-        throw error;
-    });
-}
-
-// Search for content on DVDPlay with fallback strategies
-function searchContent(title, year, mediaType) {
-    const searchQuery = title.trim(); // Remove year from search
-    // DVDPlay expects spaces to be encoded as + signs, not %20
-    const encodedQuery = searchQuery.replace(/\s+/g, '+');
-    const searchUrl = `${BASE_URL}/search.php?q=${encodedQuery}`;
-    
-    console.log(`[DVDPlay] Searching for: "${searchQuery}" at ${searchUrl}`);
-    
-    return makeHTTPRequest(searchUrl)
-        .then(response => response.text())
-        .then(html => {
-            const moviePageRegex = /<a href="([^"]+)"><p class="home">/g;
-            const results = [];
-            let match;
-            
-            while ((match = moviePageRegex.exec(html)) !== null) {
-                const movieUrl = new URL(match[1], BASE_URL).href;
-                results.push({
-                    title: title, // We'll extract the actual title later
-                    url: movieUrl
-                });
-            }
-            
-            console.log(`[DVDPlay] Found ${results.length} search results`);
-            return results;
-        })
-        .catch(error => {
-            console.log(`[DVDPlay] Search failed: ${error.message}`);
-            
-            // Fallback strategy: try browsing recent updates on main page
-            console.log(`[DVDPlay] Attempting fallback: browsing recent updates`);
-            return searchFromMainPage(title, year).catch(fallbackError => {
-                console.error(`[DVDPlay] Fallback search also failed: ${fallbackError.message}`);
-                return [];
-            });
-        });
-}
-
-// Fallback search strategy: look through recent updates on main page
-function searchFromMainPage(title, year) {
-    console.log(`[DVDPlay] Searching main page for "${title}"`);
-    
-    return makeHTTPRequest(BASE_URL)
-        .then(response => response.text())
-        .then(html => {
-            // Look for movie links in the main page
-            const movieLinkRegex = /<a href="(\/page-\d+-[^"]+)"[^>]*>([^<]+)</g;
-            const results = [];
-            let match;
-            
-            const titleLower = title.toLowerCase();
-            
-            while ((match = movieLinkRegex.exec(html)) !== null) {
-                const pageUrl = new URL(match[1], BASE_URL).href;
-                const pageTitle = match[2].trim();
-                
-                // Simple matching - check if title words appear in the page title
-                if (titleLower.split(' ').some(word => 
-                    word.length > 2 && pageTitle.toLowerCase().includes(word)
-                )) {
-                    results.push({
-                        title: pageTitle,
-                        url: pageUrl
-                    });
-                    console.log(`[DVDPlay] Found potential match: "${pageTitle}" at ${pageUrl}`);
-                }
-            }
-            
-            console.log(`[DVDPlay] Fallback search found ${results.length} potential matches`);
-            return results;
-        });
-}
-
-// Extract download links from movie page
-function extractDownloadLinks(pageUrl) {
-    console.log(`[DVDPlay] Extracting download links from: ${pageUrl}`);
-    
-    return makeHTTPRequest(pageUrl)
-        .then(response => response.text())
-        .then(html => {
-            const downloadPageLinks = [];
-            const htmlChunks = html.split('<div align="center">');
-
-            for (const chunk of htmlChunks) {
-                if (chunk.includes('<a class="touch"')) {
-                    const hrefMatch = chunk.match(/href="(\/download\/file\/[^"]+)"/);
-                    if (hrefMatch) {
-                        const fullLink = new URL(hrefMatch[1], BASE_URL).href;
-                        downloadPageLinks.push(fullLink);
-                    }
-                }
-            }
-            
-            console.log(`[DVDPlay] Found ${downloadPageLinks.length} download pages`);
-            return downloadPageLinks;
-        });
-}
-
-// Process download page to get HubCloud links
-function processDownloadLink(downloadPageUrl) {
-    console.log(`[DVDPlay] Processing download page: ${downloadPageUrl}`);
-    
-    return makeHTTPRequest(downloadPageUrl)
-        .then(response => response.text())
-        .then(downloadPageHtml => {
-            const hubCloudUrls = [];
-            
-            // Only look for HubCloud links
-            const hubCloudRegex = /<a href="(https?:\/\/hubcloud\.[^"]+)"/g;
-            let hubCloudMatch;
-            
-            while ((hubCloudMatch = hubCloudRegex.exec(downloadPageHtml)) !== null) {
-                hubCloudUrls.push(hubCloudMatch[1]);
-            }
-            
-            console.log(`[DVDPlay] Found ${hubCloudUrls.length} HubCloud links in page`);
-            
-            // Extract final links from all HubCloud URLs
-            const finalLinkPromises = hubCloudUrls.map(hubCloudUrl => {
-                return extractHubCloudLinks(hubCloudUrl).catch(err => {
-                    console.error(`[DVDPlay] Failed to extract from ${hubCloudUrl}: ${err.message}`);
-                    return [];
-                });
-            });
-            
-            return Promise.all(finalLinkPromises).then(allFinalLinks => allFinalLinks.flat());
-        })
-        .catch(error => {
-            console.error(`[DVDPlay] Error processing download link ${downloadPageUrl}: ${error.message}`);
-            return [];
-        });
-}
-
-// Find best match from search results (enhanced from 4KHDHub)
-function findBestMatch(results, query) {
-    if (!results || results.length === 0) return null;
-    if (results.length === 1) return results[0];
-    
-    var scored = results.map(function (r) {
-        var score = 0;
-        if (normalizeTitle(r.title) === normalizeTitle(query)) score += 100;
-        var sim = calculateSimilarity(r.title, query); score += sim * 50;
-        if (normalizeTitle(r.title).indexOf(normalizeTitle(query)) !== -1) score += 15; // quick containment bonus
-        var lengthDiff = Math.abs(r.title.length - query.length);
-        score += Math.max(0, 10 - lengthDiff / 5);
-        if (/(19|20)\d{2}/.test(r.title)) score += 5;
-        return { item: r, score: score };
-    });
-    scored.sort(function (a, b) { return b.score - a.score; });
-    return scored[0].item;
+  return 'Unknown';
 }
 
 // Parse quality for sorting
 function parseQualityForSort(qualityString) {
-    const match = (qualityString || '').match(/(\d{3,4})p/i);
-    return match ? parseInt(match[1], 10) : 0;
+  if (!qualityString) return 0;
+  const match = qualityString.match(/(\d{3,4})p/i);
+  return match ? parseInt(match[1], 10) : 0;
 }
 
-// Extract quality from text
-function extractQuality(text) {
-    const match = (text || '').match(/(480p|720p|1080p|2160p|4k)/i);
-    return match ? match[1] : 'Unknown';
+// Get technical details from quality string
+function getTechDetails(qualityString) {
+  if (!qualityString) return [];
+  const details = [];
+  const lowerText = qualityString.toLowerCase();
+  if (lowerText.includes('10bit')) details.push('10-bit');
+  if (lowerText.includes('hevc') || lowerText.includes('x265')) details.push('HEVC');
+  if (lowerText.includes('hdr')) details.push('HDR');
+  return details;
 }
 
-// Extract size from text
-function extractSize(text) {
-    const match = (text || '').match(/\[([^\]]+)\]/);
-    return match ? match[1] : null;
-}
+// Simple string similarity function
+function findBestMatch(mainString, targetStrings) {
+  if (!targetStrings || targetStrings.length === 0) {
+    return { bestMatch: { target: '', rating: 0 }, bestMatchIndex: -1 };
+  }
 
-// Get service name from URL
-function getServiceName(url) {
-    try {
-        const urlObj = new URL(url);
-        const hostname = urlObj.hostname.toLowerCase();
-        
-        if (hostname.includes('gofile')) return 'GoFile';
-        if (hostname.includes('gdflix')) return 'GdFlix';
-        if (hostname.includes('filepress')) return 'FilePress';
-        if (hostname.includes('fpgo')) return 'FpGo';
-        if (hostname.includes('hubcloud')) return 'HubCloud';
-        
-        // Extract domain name for unknown services
-        const parts = hostname.split('.');
-        if (parts.length >= 2) {
-            return parts[parts.length - 2].charAt(0).toUpperCase() + parts[parts.length - 2].slice(1);
-        }
-        
-        return 'Unknown Service';
-    } catch (error) {
-        return 'Unknown Service';
+  const ratings = targetStrings.map(target => {
+    if (!target) return 0;
+    
+    const main = mainString.toLowerCase();
+    const targ = target.toLowerCase();
+    
+    if (main === targ) return 1;
+    if (targ.includes(main) || main.includes(targ)) return 0.8;
+    
+    // Simple word matching
+    const mainWords = main.split(/\s+/);
+    const targWords = targ.split(/\s+/);
+    let matches = 0;
+    
+    for (const word of mainWords) {
+      if (word.length > 2 && targWords.some(tw => tw.includes(word) || word.includes(tw))) {
+        matches++;
+      }
     }
-}
-
-// TMDB helper (from 4KHDHub)
-function getTMDBDetails(tmdbId, mediaType) {
-    var url = 'https://api.themoviedb.org/3/' + mediaType + '/' + tmdbId + '?api_key=' + TMDB_API_KEY;
-    return makeHTTPRequest(url).then(function (res) { return res.json(); }).then(function (data) {
-        if (mediaType === 'movie') {
-            return { title: data.title, original_title: data.original_title, year: data.release_date ? data.release_date.split('-')[0] : null };
-        } else {
-            return { title: data.name, original_title: data.original_name, year: data.first_air_date ? data.first_air_date.split('-')[0] : null };
-        }
-    }).catch(function () { return null; });
-}
-
-// Validate if a video URL is working (not 404 or broken)
-function validateVideoUrl(url, timeout = 10000) {
-    console.log(`[DVDPlay] Validating URL: ${url.substring(0, 100)}...`);
     
-    return fetch(url, {
-        method: 'HEAD',
-        headers: {
-            'Range': 'bytes=0-1',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(timeout)
-    }).then(response => {
-        if (response.ok || response.status === 206) {
-            console.log(`[DVDPlay] ✓ URL validation successful (${response.status})`);
-            return true;
-        } else {
-            console.log(`[DVDPlay] ✗ URL validation failed with status: ${response.status}`);
-            return false;
-        }
-    }).catch(error => {
-        console.log(`[DVDPlay] ✗ URL validation failed: ${error.message}`);
-        return false;
+    return matches / Math.max(mainWords.length, targWords.length);
+  });
+
+  const bestRating = Math.max(...ratings);
+  const bestIndex = ratings.indexOf(bestRating);
+
+  return {
+    bestMatch: { target: targetStrings[bestIndex], rating: bestRating },
+    bestMatchIndex: bestIndex
+  };
+}
+
+// Search for content on MoviesMod
+async function searchMoviesMod(query) {
+  try {
+    const baseUrl = await getMoviesModDomain();
+    const searchUrl = `${baseUrl}/?s=${encodeURIComponent(query)}`;
+    console.log(`[MoviesMod] Searching: ${searchUrl}`);
+    
+    const response = await makeRequest(searchUrl);
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    const results = [];
+    $('.latestPost').each((i, element) => {
+      const linkElement = $(element).find('a');
+      const title = linkElement.attr('title');
+      const url = linkElement.attr('href');
+      if (title && url) {
+        results.push({ title, url });
+      }
     });
+
+    console.log(`[MoviesMod] Found ${results.length} search results`);
+    return results;
+  } catch (error) {
+    console.error(`[MoviesMod] Error searching: ${error.message}`);
+    return [];
+  }
 }
 
-// Main function that Nuvio will call (enhanced with better TMDB handling)
-function getStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = null) {
-    console.log(`[DVDPlay] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}`);
-    
-    var tmdbType = (mediaType === 'series' ? 'tv' : mediaType);
-    return getTMDBDetails(tmdbId, tmdbType).then(function (tmdb) {
-        if (!tmdb || !tmdb.title) return [];
-        
-        console.log(`[DVDPlay] TMDB Info: "${tmdb.title}" (${tmdb.year})`);
+// Extract download links from a movie/series page
+async function extractDownloadLinks(moviePageUrl) {
+  try {
+    const response = await makeRequest(moviePageUrl);
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const links = [];
+    const contentBox = $('.thecontent');
 
-        // 2. Search for content
-        return searchContent(tmdb.title, tmdb.year, mediaType).then(searchResults => {
-            if (searchResults.length === 0) {
-                console.log(`[DVDPlay] No search results found`);
-                return [];
+    // Get all relevant headers (for movies and TV shows) in document order
+    const headers = contentBox.find('h3:contains("Season"), h4');
+
+    headers.each((i, el) => {
+      const header = $(el);
+      const headerText = header.text().trim();
+
+      // Define the content block for this header
+      const blockContent = header.nextUntil('h3, h4');
+
+      if (header.is('h3') && headerText.toLowerCase().includes('season')) {
+        // TV Show Logic - Updated to find "Episode Links" text links
+        const linkElements = blockContent.find('a').filter((i, el) => {
+          const text = $(el).text().trim().toLowerCase();
+          return text.includes('episode links') && !text.includes('batch');
+        });
+
+        linkElements.each((j, linkEl) => {
+          const buttonText = $(linkEl).text().trim();
+          const linkUrl = $(linkEl).attr('href');
+          if (linkUrl) {
+            links.push({
+              quality: `${headerText} - ${buttonText}`,
+              url: linkUrl
+            });
+          }
+        });
+      } else if (header.is('h4')) {
+        // Movie Logic - Updated for new maxbutton structure
+        const linkElement = blockContent.find('a.maxbutton-download-links, .maxbutton').first();
+        if (linkElement.length > 0) {
+          const link = linkElement.attr('href');
+          const cleanQuality = extractQuality(headerText);
+          if (link && cleanQuality) {
+            links.push({
+              quality: cleanQuality,
+              url: link
+            });
+          }
+        }
+      }
+    });
+
+    console.log(`[MoviesMod] Extracted ${links.length} download links`);
+    return links;
+  } catch (error) {
+    console.error(`[MoviesMod] Error extracting download links: ${error.message}`);
+    return [];
+  }
+}
+
+// Resolve intermediate links (dramadrip, episodes.modpro.blog, links.modpro.blog, posts.modpro.blog, modrefer.in)
+async function resolveIntermediateLink(initialUrl, refererUrl, quality) {
+  try {
+    const urlObject = new URL(initialUrl);
+
+    // Handle links.modpro.blog and posts.modpro.blog (new maxbutton links)
+    if (urlObject.hostname.includes('links.modpro.blog') || urlObject.hostname.includes('posts.modpro.blog')) {
+      const response = await makeRequest(initialUrl, { headers: { 'Referer': refererUrl } });
+      const html = await response.text();
+      const $ = cheerio.load(html);
+      const finalLinks = [];
+
+      // Look for driveseed.org, tech.unblockedgames.world links in entry content
+      $('.entry-content a[href*="driveseed.org"], .entry-content a[href*="tech.unblockedgames.world"], .entry-content a[href*="tech.creativeexpressionsblog.com"], .entry-content a[href*="tech.examzculture.in"]').each((i, el) => {
+        const link = $(el).attr('href');
+        const text = $(el).text().trim();
+        if (link && text && !text.toLowerCase().includes('batch')) {
+          finalLinks.push({
+            server: text.replace(/\s+/g, ' '),
+            url: link,
+          });
+        }
+      });
+
+      // If no links found in entry-content, try broader search
+      if (finalLinks.length === 0) {
+        $('a[href*="driveseed.org"], a[href*="tech.unblockedgames.world"], a[href*="tech.creativeexpressionsblog.com"], a[href*="tech.examzculture.in"]').each((i, el) => {
+          const link = $(el).attr('href');
+          const text = $(el).text().trim();
+          if (link && text && !text.toLowerCase().includes('batch')) {
+            finalLinks.push({
+              server: text.replace(/\s+/g, ' ') || 'Download Link',
+              url: link,
+            });
+          }
+        });
+      }
+
+      console.log(`[MoviesMod] Found ${finalLinks.length} links from ${urlObject.hostname}`);
+      return finalLinks;
+    }
+
+    // Handle episodes.modpro.blog (for TV shows)
+    else if (urlObject.hostname.includes('episodes.modpro.blog')) {
+      const response = await makeRequest(initialUrl, { headers: { 'Referer': refererUrl } });
+      const html = await response.text();
+      const $ = cheerio.load(html);
+      const finalLinks = [];
+
+      // Look for episode headers (h3 containing "Episode") - links are inside h3 elements
+      $('h3').each((i, el) => {
+        const headerText = $(el).text().trim();
+        const episodeMatch = headerText.match(/Episode\s+(\d+)/i);
+
+        if (episodeMatch) {
+          const episodeNum = episodeMatch[1];
+          // Find the link inside this h3 element
+          const linkElement = $(el).find('a').first();
+
+          if (linkElement.length > 0) {
+            const link = linkElement.attr('href');
+
+            if (link) {
+              finalLinks.push({
+                server: `Episode ${episodeNum}`,
+                url: link,
+              });
             }
+          }
+        }
+      });
 
-            // 3. Extract download links from best match
-            const selectedResult = findBestMatch(searchResults, tmdb.title);
-            return extractDownloadLinks(selectedResult.url).then(downloadLinks => {
-                if (downloadLinks.length === 0) {
-                    console.log(`[DVDPlay] No download pages found`);
-                    return [];
+      console.log(`[MoviesMod] Found ${finalLinks.length} episode links from episodes.modpro.blog`);
+      return finalLinks;
+    }
+
+    // Handle modrefer.in (legacy)
+    else if (urlObject.hostname.includes('modrefer.in')) {
+      const encodedUrl = urlObject.searchParams.get('url');
+      if (!encodedUrl) {
+        console.error('[MoviesMod] Could not find encoded URL in modrefer.in link.');
+        return [];
+      }
+
+      // Use atob for base64 decoding (React Native compatible)
+      const decodedUrl = atob(encodedUrl);
+      console.log(`[MoviesMod] Decoded modrefer URL: ${decodedUrl}`);
+      
+      const response = await makeRequest(decodedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Referer': refererUrl,
+        }
+      });
+      const html = await response.text();
+      const $ = cheerio.load(html);
+      const finalLinks = [];
+
+      // Debug: Check what content is available on the page
+      console.log(`[MoviesMod] Page title: ${$('title').text()}`);
+      console.log(`[MoviesMod] Total links on page: ${$('a').length}`);
+      console.log(`[MoviesMod] HTML length: ${html.length} characters`);
+      
+      // Look for timed content links (this is the key part from OG)
+      $('.timed-content-client_show_0_5_0 a').each((i, el) => {
+        const link = $(el).attr('href');
+        const text = $(el).text().trim();
+        if (link) {
+          finalLinks.push({
+            server: text,
+            url: link,
+          });
+        }
+      });
+      
+      // If no timed content found, look for any driveseed or tech links
+      if (finalLinks.length === 0) {
+        console.log(`[MoviesMod] No timed content found, looking for direct links...`);
+        $('a').each((i, el) => {
+          const link = $(el).attr('href');
+          const text = $(el).text().trim();
+          if (link && (link.includes('driveseed.org') || link.includes('tech.unblockedgames.world') || link.includes('tech.examzculture.in') || link.includes('tech.creativeexpressionsblog.com') || link.includes('tech.examdegree.site'))) {
+            console.log(`[MoviesMod] Found direct link: ${text} -> ${link}`);
+            finalLinks.push({
+              server: text || 'Download Link',
+              url: link,
+            });
+          }
+        });
+      }
+      
+      // Also look for any additional download buttons or links that might be hidden
+      if (finalLinks.length === 0) {
+        console.log(`[MoviesMod] Looking for alternative download patterns...`);
+        $('button, .download-btn, .btn, [class*="download"], [class*="btn"]').each((i, el) => {
+          const $el = $(el);
+          const link = $el.attr('href') || $el.attr('data-href') || $el.find('a').attr('href');
+          const text = $el.text().trim();
+          if (link && (link.includes('driveseed.org') || link.includes('tech.unblockedgames.world') || link.includes('tech.examzculture.in') || link.includes('tech.creativeexpressionsblog.com') || link.includes('tech.examdegree.site'))) {
+            console.log(`[MoviesMod] Found alternative link: ${text} -> ${link}`);
+            finalLinks.push({
+              server: text || 'Alternative Download',
+              url: link,
+            });
+          }
+        });
+      }
+      
+      console.log(`[MoviesMod] Found ${finalLinks.length} total links`);
+      return finalLinks;
+    }
+
+    return [];
+  } catch (error) {
+    console.error(`[MoviesMod] Error resolving intermediate link: ${error.message}`);
+    return [];
+  }
+}
+
+// Resolve tech.unblockedgames.world SID links to driveleech URLs
+async function resolveTechUnblockedLink(sidUrl) {
+  console.log(`[MoviesMod] Resolving SID link: ${sidUrl}`);
+  
+  try {
+    // Step 1: Get the initial page
+    const response = await makeRequest(sidUrl);
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    
+    const initialForm = $('#landing');
+    const wp_http_step1 = initialForm.find('input[name="_wp_http"]').val();
+    const action_url_step1 = initialForm.attr('action');
+
+    if (!wp_http_step1 || !action_url_step1) {
+      console.error("  [SID] Error: Could not find _wp_http in initial form.");
+      return null;
+    }
+
+    // Step 2: POST to the first form's action URL
+    const step1Data = new URLSearchParams({ '_wp_http': wp_http_step1 });
+    const responseStep1 = await makeRequest(action_url_step1, {
+      method: 'POST',
+      headers: { 
+        'Referer': sidUrl, 
+        'Content-Type': 'application/x-www-form-urlencoded' 
+      },
+      body: step1Data.toString()
+    });
+
+    // Step 3: Parse verification page for second form
+    const html2 = await responseStep1.text();
+    const $2 = cheerio.load(html2);
+    const verificationForm = $2('#landing');
+    const action_url_step2 = verificationForm.attr('action');
+    const wp_http2 = verificationForm.find('input[name="_wp_http2"]').val();
+    const token = verificationForm.find('input[name="token"]').val();
+
+    if (!action_url_step2) {
+      console.error("  [SID] Error: Could not find verification form.");
+      return null;
+    }
+
+    // Step 4: POST to the verification URL
+    const step2Data = new URLSearchParams({ '_wp_http2': wp_http2, 'token': token });
+    const responseStep2 = await makeRequest(action_url_step2, {
+      method: 'POST',
+      headers: { 
+        'Referer': responseStep1.url, 
+        'Content-Type': 'application/x-www-form-urlencoded' 
+      },
+      body: step2Data.toString()
+    });
+
+    // Step 5: Find dynamic cookie and link from JavaScript
+    const finalHtml = await responseStep2.text();
+    let finalLinkPath = null;
+    let cookieName = null;
+    let cookieValue = null;
+
+    const cookieMatch = finalHtml.match(/s_343\('([^']+)',\s*'([^']+)'/);
+    const linkMatch = finalHtml.match(/c\.setAttribute\("href",\s*"([^"]+)"\)/);
+
+    if (cookieMatch) {
+      cookieName = cookieMatch[1].trim();
+      cookieValue = cookieMatch[2].trim();
+    }
+    if (linkMatch) {
+      finalLinkPath = linkMatch[1].trim();
+    }
+
+    if (!finalLinkPath || !cookieName || !cookieValue) {
+      console.error("  [SID] Error: Could not extract dynamic cookie/link from JS.");
+      return null;
+    }
+
+    const { origin } = new URL(sidUrl);
+    const finalUrl = new URL(finalLinkPath, origin).href;
+
+    // Step 6: Make final request with cookie
+    const finalResponse = await makeRequest(finalUrl, {
+      headers: { 
+        'Referer': responseStep2.url,
+        'Cookie': `${cookieName}=${cookieValue}`
+      }
+    });
+
+    // Step 7: Extract driveleech URL from meta refresh tag
+    const metaHtml = await finalResponse.text();
+    const $3 = cheerio.load(metaHtml);
+    const metaRefresh = $3('meta[http-equiv="refresh"]');
+    
+    if (metaRefresh.length > 0) {
+      const content = metaRefresh.attr('content');
+      const urlMatch = content.match(/url=(.*)/i);
+      if (urlMatch && urlMatch[1]) {
+        const driveleechUrl = urlMatch[1].replace(/"/g, "").replace(/'/g, "");
+        console.log(`  [SID] SUCCESS! Resolved Driveleech URL: ${driveleechUrl}`);
+        return driveleechUrl;
+      }
+    }
+
+    console.error("  [SID] Error: Could not find meta refresh tag with Driveleech URL.");
+    return null;
+
+  } catch (error) {
+    console.error(`  [SID] Error during SID resolution: ${error.message}`);
+    return null;
+  }
+}
+
+// Resolve driveseed.org links to get download options
+async function resolveDriveseedLink(driveseedUrl) {
+  try {
+    const response = await makeRequest(driveseedUrl, {
+      headers: {
+        'Referer': 'https://links.modpro.blog/',
+      }
+    });
+    const html = await response.text();
+
+    const redirectMatch = html.match(/window\.location\.replace\("([^"]+)"\)/);
+
+    if (redirectMatch && redirectMatch[1]) {
+      const finalPath = redirectMatch[1];
+      const finalUrl = `https://driveseed.org${finalPath}`;
+
+      const finalResponse = await makeRequest(finalUrl, {
+        headers: {
+          'Referer': driveseedUrl,
+        }
+      });
+      const finalHtml = await finalResponse.text();
+      const $ = cheerio.load(finalHtml);
+      
+      const downloadOptions = [];
+      let size = null;
+      let fileName = null;
+
+      // Extract size and filename from the list
+      $('ul.list-group li').each((i, el) => {
+        const text = $(el).text();
+        if (text.includes('Size :')) {
+          size = text.split(':')[1].trim();
+        } else if (text.includes('Name :')) {
+          fileName = text.split(':')[1].trim();
+        }
+      });
+
+      // Find Resume Cloud button (primary)
+      const resumeCloudLink = $('a:contains("Resume Cloud")').attr('href');
+      if (resumeCloudLink) {
+        downloadOptions.push({
+          title: 'Resume Cloud',
+          type: 'resume',
+          url: `https://driveseed.org${resumeCloudLink}`,
+          priority: 1
+        });
+      }
+
+      // Find Resume Worker Bot (fallback)
+      const workerSeedLink = $('a:contains("Resume Worker Bot")').attr('href');
+      if (workerSeedLink) {
+        downloadOptions.push({
+          title: 'Resume Worker Bot',
+          type: 'worker',
+          url: workerSeedLink,
+          priority: 2
+        });
+      }
+
+      // Find any other download links as additional fallbacks
+      $('a[href*="/download/"]').each((i, el) => {
+        const href = $(el).attr('href');
+        const text = $(el).text().trim();
+        if (href && text && !downloadOptions.some(opt => opt.url === href)) {
+          downloadOptions.push({
+            title: text,
+            type: 'generic',
+            url: href.startsWith('http') ? href : `https://driveseed.org${href}`,
+            priority: 4
+          });
+        }
+      });
+
+      // Find Instant Download (final fallback)
+      const instantDownloadLink = $('a:contains("Instant Download")').attr('href');
+      if (instantDownloadLink) {
+        downloadOptions.push({
+          title: 'Instant Download',
+          type: 'instant',
+          url: instantDownloadLink,
+          priority: 3
+        });
+      }
+
+      // Sort by priority
+      downloadOptions.sort((a, b) => a.priority - b.priority);
+      return { downloadOptions, size, fileName };
+    }
+    return { downloadOptions: [], size: null, fileName: null };
+  } catch (error) {
+    console.error(`[MoviesMod] Error resolving Driveseed link: ${error.message}`);
+    return { downloadOptions: [], size: null, fileName: null };
+  }
+}
+
+// Resolve Resume Cloud link to final download URL
+async function resolveResumeCloudLink(resumeUrl) {
+  try {
+    const response = await makeRequest(resumeUrl, {
+      headers: {
+        'Referer': 'https://driveseed.org/',
+      }
+    });
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const downloadLink = $('a:contains("Cloud Resume Download")').attr('href');
+    return downloadLink || null;
+  } catch (error) {
+    console.error(`[MoviesMod] Error resolving Resume Cloud link: ${error.message}`);
+    return null;
+  }
+}
+
+// Resolve Video Seed (Instant Download) link
+async function resolveVideoSeedLink(videoSeedUrl) {
+  try {
+    const urlParams = new URLSearchParams(new URL(videoSeedUrl).search);
+    const keys = urlParams.get('url');
+
+    if (keys) {
+      const apiUrl = `${new URL(videoSeedUrl).origin}/api`;
+      const formData = new URLSearchParams();
+      formData.append('keys', keys);
+
+      const apiResponse = await fetch(apiUrl, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'x-token': new URL(videoSeedUrl).hostname,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (apiResponse.ok) {
+        const responseData = await apiResponse.json();
+        if (responseData && responseData.url) {
+          return responseData.url;
+        }
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error(`[MoviesMod] Error resolving VideoSeed link: ${error.message}`);
+    return null;
+  }
+}
+
+// Validate if a video URL is working
+async function validateVideoUrl(url, timeout = 10000) {
+  try {
+    console.log(`[MoviesMod] Validating URL: ${url.substring(0, 100)}...`);
+    const response = await fetch(url, {
+      method: 'HEAD',
+      headers: {
+        'Range': 'bytes=0-1',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (response.ok || response.status === 206) {
+      console.log(`[MoviesMod] ✓ URL validation successful (${response.status})`);
+      return true;
+    } else {
+      console.log(`[MoviesMod] ✗ URL validation failed with status: ${response.status}`);
+      return false;
+    }
+  } catch (error) {
+    console.log(`[MoviesMod] ✗ URL validation failed: ${error.message}`);
+    return false;
+  }
+}
+
+// Process a single download link to get final stream
+async function processDownloadLink(link, selectedResult, mediaType, episodeNum) {
+  try {
+    console.log(`[MoviesMod] Processing quality: ${link.quality}`);
+
+    const finalLinks = await resolveIntermediateLink(link.url, selectedResult.url, link.quality);
+    if (!finalLinks || finalLinks.length === 0) {
+      console.log(`[MoviesMod] No final links found for ${link.quality}`);
+      return null;
+    }
+
+    // Filter for specific episode if needed
+    let targetLinks = finalLinks;
+    if ((mediaType === 'tv' || mediaType === 'series') && episodeNum !== null) {
+      targetLinks = finalLinks.filter(targetLink => {
+        const serverName = targetLink.server.toLowerCase();
+        const episodePatterns = [
+          new RegExp(`episode\\s+${episodeNum}\\b`, 'i'),
+          new RegExp(`ep\\s+${episodeNum}\\b`, 'i'),
+          new RegExp(`e${episodeNum}\\b`, 'i'),
+          new RegExp(`\\b${episodeNum}\\b`)
+        ];
+
+        return episodePatterns.some(pattern => pattern.test(serverName));
+      });
+
+      if (targetLinks.length === 0) {
+        console.log(`[MoviesMod] No episode ${episodeNum} found for ${link.quality}`);
+        return null;
+      }
+    }
+
+    // Process each target link
+    for (const targetLink of targetLinks) {
+      try {
+        let currentUrl = targetLink.url;
+
+        // Handle SID links if they appear
+        if (currentUrl && (currentUrl.includes('tech.unblockedgames.world') || currentUrl.includes('tech.creativeexpressionsblog.com') || currentUrl.includes('tech.examzculture.in') || currentUrl.includes('tech.examdegree.site'))) {
+          console.log(`[MoviesMod] Resolving SID link: ${targetLink.server}`);
+          const resolvedUrl = await resolveTechUnblockedLink(currentUrl);
+          if (!resolvedUrl) {
+            console.log(`[MoviesMod] Failed to resolve SID link for ${targetLink.server}`);
+            continue;
+          }
+          
+          // Skip broken link report pages
+          if (resolvedUrl.includes('report-broken-links') || resolvedUrl.includes('moviesmod.wiki')) {
+            console.log(`[MoviesMod] Skipping broken link report page for ${targetLink.server}`);
+            continue;
+          }
+          
+          currentUrl = resolvedUrl;
+        }
+
+        if (currentUrl && currentUrl.includes('driveseed.org')) {
+          const { downloadOptions, size, fileName } = await resolveDriveseedLink(currentUrl);
+
+          if (!downloadOptions || downloadOptions.length === 0) {
+            console.log(`[MoviesMod] No download options found for ${targetLink.server} - ${currentUrl}`);
+            continue;
+          }
+
+          // Try download methods in order of priority
+          let finalDownloadUrl = null;
+          let usedMethod = null;
+
+          for (const option of downloadOptions) {
+            try {
+              console.log(`[MoviesMod] Trying ${option.title} for ${link.quality}...`);
+
+              if (option.type === 'resume' || option.type === 'worker') {
+                finalDownloadUrl = await resolveResumeCloudLink(option.url);
+              } else if (option.type === 'instant') {
+                finalDownloadUrl = await resolveVideoSeedLink(option.url);
+              } else if (option.type === 'generic') {
+                // For generic download links, try them directly
+                finalDownloadUrl = option.url;
+              }
+
+              if (finalDownloadUrl) {
+                // Check if URL validation is enabled
+                if (typeof URL_VALIDATION_ENABLED !== 'undefined' && !URL_VALIDATION_ENABLED) {
+                  usedMethod = option.title;
+                  console.log(`[MoviesMod] ✓ URL validation disabled, accepting ${usedMethod} result`);
+                  break;
+                }
+                
+                const isValid = await validateVideoUrl(finalDownloadUrl);
+                if (isValid) {
+                  usedMethod = option.title;
+                  console.log(`[MoviesMod] ✓ Successfully resolved using ${usedMethod}`);
+                  break;
+                } else {
+                  console.log(`[MoviesMod] ✗ ${option.title} returned invalid URL`);
+                  finalDownloadUrl = null;
+                }
+              }
+            } catch (error) {
+              console.log(`[MoviesMod] ✗ ${option.title} failed: ${error.message}`);
+            }
+          }
+
+          if (finalDownloadUrl) {
+            const actualQuality = extractQuality(link.quality);
+            const sizeInfo = size || link.quality.match(/\[([^\]]+)\]/)?.[1];
+            const cleanFileName = fileName ? fileName.replace(/\.[^/.]+$/, "").replace(/[._]/g, ' ') : `Stream from ${link.quality}`;
+            const techDetails = getTechDetails(link.quality);
+            const techDetailsString = techDetails.length > 0 ? ` • ${techDetails.join(' • ')}` : '';
+
+            return {
+              name: `MoviesMod`,
+              title: `${cleanFileName}\n${sizeInfo || ''}${techDetailsString}`,
+              url: finalDownloadUrl,
+              quality: actualQuality,
+              size: sizeInfo,
+              fileName: fileName,
+              type: 'direct'
+            };
+          }
+        }
+      } catch (error) {
+        console.error(`[MoviesMod] Error processing target link: ${error.message}`);
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error(`[MoviesMod] Error processing quality ${link.quality}: ${error.message}`);
+    return null;
+  }
+}
+
+// Main function to get streams for TMDB content
+async function getStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = null) {
+  console.log(`[MoviesMod] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}${seasonNum ? `, S${seasonNum}E${episodeNum}` : ''}`);
+
+  try {
+    // Get TMDB info
+    const tmdbUrl = `https://api.themoviedb.org/3/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}?api_key=${TMDB_API_KEY}`;
+    const tmdbResponse = await makeRequest(tmdbUrl);
+    const tmdbData = await tmdbResponse.json();
+
+    const title = mediaType === 'tv' ? tmdbData.name : tmdbData.title;
+    const year = mediaType === 'tv' ? tmdbData.first_air_date?.substring(0, 4) : tmdbData.release_date?.substring(0, 4);
+
+    if (!title) {
+      throw new Error('Could not extract title from TMDB response');
+    }
+
+    console.log(`[MoviesMod] TMDB Info: "${title}" (${year})`);
+
+    // Search for the media
+    const searchResults = await searchMoviesMod(title);
+    if (searchResults.length === 0) {
+      console.log(`[MoviesMod] No search results found`);
+      return [];
+    }
+
+    // Use string similarity to find the best match
+    const titles = searchResults.map(r => r.title);
+    const bestMatch = findBestMatch(title, titles);
+
+    console.log(`[MoviesMod] Best match for "${title}" is "${bestMatch.bestMatch.target}" with a rating of ${bestMatch.bestMatch.rating.toFixed(2)}`);
+
+    let selectedResult = null;
+    if (bestMatch.bestMatch.rating > 0.3) {
+      selectedResult = searchResults[bestMatch.bestMatchIndex];
+
+      // Additional check for year if it's a movie
+      if (mediaType === 'movie' && year) {
+        if (!selectedResult.title.includes(year)) {
+          console.warn(`[MoviesMod] Title match found, but year mismatch. Matched: "${selectedResult.title}", Expected year: ${year}. Discarding match.`);
+          selectedResult = null;
+        }
+      }
+    }
+
+    if (!selectedResult) {
+      // Try stricter search
+      console.log('[MoviesMod] Similarity match failed. Trying stricter search...');
+      const titleRegex = new RegExp(`\\b${escapeRegExp(title.toLowerCase())}\\b`);
+
+      if (mediaType === 'movie') {
+        selectedResult = searchResults.find(r =>
+          titleRegex.test(r.title.toLowerCase()) &&
+          (!year || r.title.includes(year))
+        );
+      } else {
+        selectedResult = searchResults.find(r =>
+          titleRegex.test(r.title.toLowerCase()) &&
+          r.title.toLowerCase().includes('season')
+        );
+      }
+    }
+
+    if (!selectedResult) {
+      console.log(`[MoviesMod] No suitable search result found for "${title} (${year})"`);
+      return [];
+    }
+
+    console.log(`[MoviesMod] Selected: ${selectedResult.title}`);
+
+    // Extract download links
+    const downloadLinks = await extractDownloadLinks(selectedResult.url);
+    if (downloadLinks.length === 0) {
+      console.log(`[MoviesMod] No download links found`);
+      return [];
+    }
+
+    let relevantLinks = downloadLinks;
+    if ((mediaType === 'tv' || mediaType === 'series') && seasonNum !== null) {
+      relevantLinks = downloadLinks.filter(link =>
+        link.quality.toLowerCase().includes(`season ${seasonNum}`) ||
+        link.quality.toLowerCase().includes(`s${seasonNum}`)
+      );
+    }
+
+    // Filter out 480p links
+    relevantLinks = relevantLinks.filter(link => !link.quality.toLowerCase().includes('480p'));
+    console.log(`[MoviesMod] ${relevantLinks.length} links remaining after 480p filter.`);
+
+    if (relevantLinks.length === 0) {
+      console.log(`[MoviesMod] No relevant links found after filtering`);
+      return [];
+    }
+
+    // Process links to get final streams - resolve intermediate links first
+    const streamPromises = relevantLinks.map(async (link) => {
+      try {
+        // Resolve intermediate link (modpro.blog, modrefer.in, etc.)
+        const finalLinks = await resolveIntermediateLink(link.url, selectedResult.url, link.quality);
+        if (!finalLinks || finalLinks.length === 0) {
+          console.log(`[MoviesMod] No final links found for ${link.quality}`);
+          return null;
+        }
+
+        // Process each final link (driveseed.org or tech.unblockedgames.world)
+        const processedStreams = [];
+        for (const targetLink of finalLinks) {
+          let currentUrl = targetLink.url;
+
+          // Check if this is an episode link (has "Episode" in server name)
+          const isEpisodeLink = targetLink.server && targetLink.server.toLowerCase().includes('episode');
+          console.log(`[MoviesMod] Processing link: server="${targetLink.server}", isEpisodeLink=${isEpisodeLink}, url=${targetLink.url.substring(0, 50)}...`);
+
+          // Handle SID links (tech.unblockedgames.world) - for both episode links and regular links
+          if (currentUrl.includes('tech.unblockedgames.world') ||
+              currentUrl.includes('tech.creativeexpressionsblog.com') ||
+              currentUrl.includes('tech.examzculture.in')) {
+            const resolvedUrl = await resolveTechUnblockedLink(currentUrl);
+            if (!resolvedUrl) continue;
+            currentUrl = resolvedUrl;
+          }
+
+          // Handle driveseed.org links
+          if (currentUrl && currentUrl.includes('driveseed.org')) {
+            console.log(`[MoviesMod] Processing driveseed URL: ${currentUrl.substring(0, 80)}...`);
+            const driveseedInfo = await resolveDriveseedLink(currentUrl);
+            console.log(`[MoviesMod] Driveseed info: ${driveseedInfo ? `options=${driveseedInfo.downloadOptions?.length || 0}` : 'null'}`);
+
+            if (driveseedInfo && driveseedInfo.downloadOptions && driveseedInfo.downloadOptions.length > 0) {
+              console.log(`[MoviesMod] Download options available: ${driveseedInfo.downloadOptions.map(opt => `${opt.type}: ${opt.title}`).join(', ')}`);
+
+              // Try download methods in order of priority (sorted by priority)
+              const sortedOptions = driveseedInfo.downloadOptions.sort((a, b) => a.priority - b.priority);
+              let finalDownloadUrl = null;
+              let usedMethod = null;
+
+              for (const option of sortedOptions) {
+                console.log(`[MoviesMod] Trying ${option.title} (${option.type}) for ${link.quality}...`);
+
+                if (option.type === 'resume' || option.type === 'worker') {
+                  finalDownloadUrl = await resolveResumeCloudLink(option.url);
+                  console.log(`[MoviesMod] Resume/Worker result: ${finalDownloadUrl ? 'got URL' : 'null'}`);
+                } else if (option.type === 'instant') {
+                  // Try the API method first
+                  finalDownloadUrl = await resolveVideoSeedLink(option.url);
+                  console.log(`[MoviesMod] Instant API result: ${finalDownloadUrl ? 'got URL' : 'null'}`);
+
+                  // If API fails, try using the URL directly
+                  if (!finalDownloadUrl) {
+                    finalDownloadUrl = option.url;
+                    console.log(`[MoviesMod] Instant fallback: using URL directly`);
+                  }
+                } else if (option.type === 'generic') {
+                  finalDownloadUrl = option.url;
+                  console.log(`[MoviesMod] Generic result: using URL directly`);
                 }
 
-                // 4. Process download links to get final streams
-                const streamPromises = downloadLinks.map(link => processDownloadLink(link));
-                return Promise.all(streamPromises).then(nestedStreams => {
-                    let allStreams = nestedStreams.flat();
+                if (finalDownloadUrl) {
+                  const isValid = await validateVideoUrl(finalDownloadUrl);
+                  if (isValid) {
+                    usedMethod = option.title;
+                    console.log(`[MoviesMod] ✓ Successfully resolved using ${usedMethod}`);
+                    break;
+                  } else {
+                    console.log(`[MoviesMod] ✗ ${option.title} returned invalid URL`);
+                    finalDownloadUrl = null;
+                  }
+                }
+              }
 
-                    // 5. Filter out unwanted links (e.g., Google AMP links, suspicious domains)
-                    allStreams = allStreams.filter(stream => {
-                        const url = stream.url.toLowerCase();
-                        return !url.includes('cdn.ampproject.org') && 
-                               !url.includes('bloggingvector.shop') &&
-                               !url.includes('winexch.com');
-                    });
+              if (finalDownloadUrl) {
+                const finalUrl = await resolveResumeCloudLink(resumeCloud.url);
+                console.log(`[MoviesMod] Resume Cloud final URL: ${finalUrl ? 'resolved' : 'null'}`);
 
-                    // 6. Remove duplicates based on URL
-                    const uniqueStreams = Array.from(new Map(allStreams.map(stream => [stream.url, stream])).values());
+                if (finalUrl && await validateVideoUrl(finalUrl)) {
+                  console.log(`[MoviesMod] URL validation: SUCCESS`);
+                  // For episode links, filter by specific episode number
+                  if (isEpisodeLink && episodeNum !== null) {
+                    const episodeFromServer = targetLink.server.match(/Episode\s+(\d+)/i);
+                    console.log(`[MoviesMod] Episode filtering: server="${targetLink.server}", requested episode=${episodeNum}, found episode=${episodeFromServer ? episodeFromServer[1] : 'none'}`);
+                    if (episodeFromServer && parseInt(episodeFromServer[1]) !== episodeNum) {
+                      console.log(`[MoviesMod] Skipping episode ${episodeFromServer[1]} (not episode ${episodeNum})`);
+                      continue; // Skip if not the requested episode
+                    } else if (episodeFromServer && parseInt(episodeFromServer[1]) === episodeNum) {
+                      console.log(`[MoviesMod] Processing episode ${episodeNum} - continuing...`);
+                    }
+                  }
 
-                    // 7. Validate URLs in parallel (optional, can be disabled for speed)
-                    console.log(`[DVDPlay] Validating ${uniqueStreams.length} stream URLs...`);
-                    const validationPromises = uniqueStreams.map(stream => {
-                        try {
-                            // Check if URL validation is enabled (can be disabled for faster results)
-                            if (typeof URL_VALIDATION_ENABLED !== 'undefined' && !URL_VALIDATION_ENABLED) {
-                                console.log(`[DVDPlay] ✓ URL validation disabled, accepting stream`);
-                                return Promise.resolve(stream);
-                            }
-                            
-                            return validateVideoUrl(stream.url, 8000).then(isValid => {
-                                if (isValid) {
-                                    return stream;
-                                } else {
-                                    console.log(`[DVDPlay] ✗ Filtering out invalid stream: ${stream.name}`);
-                                    return null;
-                                }
-                            }).catch(error => {
-                                console.log(`[DVDPlay] ✗ Validation error for ${stream.name}: ${error.message}`);
-                                return null; // Filter out streams that fail validation
-                            });
-                        } catch (error) {
-                            console.log(`[DVDPlay] ✗ Validation error for ${stream.name}: ${error.message}`);
-                            return Promise.resolve(null); // Filter out streams that fail validation
-                        }
-                    });
+                  const mediaTitle = mediaType === 'tv' && seasonNum && episodeNum
+                    ? `${selectedResult.title} S${seasonNum.toString().padStart(2, '0')}E${episodeNum.toString().padStart(2, '0')}`
+                    : selectedResult.title;
 
-                    return Promise.all(validationPromises).then(validatedStreams => {
-                        const validStreams = validatedStreams.filter(stream => stream !== null);
+                  processedStreams.push({
+                    name: `MoviesMod ${targetLink.server || ''} - ${link.quality}`.trim(),
+                    title: mediaTitle,
+                    url: finalUrl,
+                    quality: link.quality,
+                    size: driveseedInfo.size || 'Unknown',
+                    headers: {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                      'Referer': 'https://driveseed.org/'
+                    },
+                    provider: 'moviesmod'
+                  });
+                  break; // Use first successful resolution
+                }
+              }
+            }
+          }
+        }
 
-                        // 8. Sort by quality (highest first)
-                        validStreams.sort((a, b) => {
-                            const qualityA = parseQualityForSort(a.quality);
-                            const qualityB = parseQualityForSort(b.quality);
-                            return qualityB - qualityA;
-                        });
-
-                        console.log(`[DVDPlay] Successfully processed ${validStreams.length} valid streams (${uniqueStreams.length - validStreams.length} filtered out)`);
-                        return validStreams;
-                    });
-                });
-            });
-        });
-    }).catch(function (error) {
-        console.error(`[DVDPlay] Error in getStreams: ${error.message}`);
-        return [];
+        const result = processedStreams.length > 0 ? processedStreams[0] : null;
+        console.log(`[MoviesMod] Returning ${result ? 'stream' : 'null'} for ${link.quality}`);
+        return result;
+      } catch (error) {
+        console.error(`[MoviesMod] Error processing link ${link.quality}: ${error.message}`);
+        return null;
+      }
     });
+
+    const rawStreams = await Promise.all(streamPromises);
+    console.log(`[MoviesMod] Raw streams before filtering: ${rawStreams.length}`);
+    rawStreams.forEach((stream, i) => {
+      console.log(`  [${i}] ${stream ? 'VALID' : 'NULL'}`);
+    });
+
+    const streams = rawStreams.filter(Boolean);
+    console.log(`[MoviesMod] Streams after null filtering: ${streams.length}`);
+
+    // Sort by quality descending
+    streams.sort((a, b) => {
+      const qualityA = parseQualityForSort(a.quality);
+      const qualityB = parseQualityForSort(b.quality);
+      return qualityB - qualityA;
+    });
+
+    console.log(`[MoviesMod] Successfully processed ${streams.length} streams`);
+    return streams;
+
+  } catch (error) {
+    console.error(`[MoviesMod] Error in getStreams: ${error.message}`);
+    return [];
+  }
 }
 
-// Export for React Native
+// Export the main function
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { getStreams, extractHubCloudLinks, searchContent, extractDownloadLinks, processDownloadLink };
+  module.exports = { getStreams };
 } else {
-    global.getStreams = getStreams;
-    global.extractHubCloudLinks = extractHubCloudLinks;
-    global.searchContent = searchContent;
-    global.extractDownloadLinks = extractDownloadLinks;
-    global.processDownloadLink = processDownloadLink;
+  // For React Native environment
+  global.getStreams = getStreams;
 }
