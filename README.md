@@ -12,10 +12,12 @@ A collection of high-quality local scrapers for the Nuvio streaming application.
    ```
 4. Enable the scrapers you want to use
 
-## Available Scrapers
+## Available Scrapers 
 
 | Provider | Content | Quality | NuvioApp | NuvioTV |
 |---|---|---|---|---|
+| 📽️ AnimeKai | Anime | 1080p / 720p | ✅ | ✅ |
+| 🎥 KissKH | Asian Movies / Drama | 1080p / 720p | ✅ | ✅ |
 | 🎥 VidSrc | Film & Serial | 1080p / 720p | ✅ | ✅ |
 | 🎬 VidLink | Film & Serial | 1080p / 720p | ✅ | ✅ |
 
