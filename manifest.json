@@ -94,6 +94,20 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "animelok",
+      "name": "AnimeLok",
+      "description": "AnimeLok TV episodes via AnimeLok servers",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/animelok.js",
+      "enabled": true,
+      "limited": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en", "hi', "ta"]
+    },
+    {
       "id": "castle",
       "name": "Castle",
       "description": "Multi Lang provider",
