@@ -1,407 +1,393 @@
-// Pelisplushd provider for Nuvio
-// Source flow based on embed69 extraction used in CloudStream extension.
-
-const TMDB_API_BASE = 'https://api.themoviedb.org/3';
-const TMDB_API_KEY = '1865f43a0549ca50d341dd9ab8b29f49';
-const BASE_URL = 'https://pelisplushd.la';
-
-const DEFAULT_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  'Referer': BASE_URL + '/'
+/**
+ * animelok - Built from src/animelok/
+ * Generated: 2026-03-06T14:24:07.881Z
+ */
+var __defProp = Object.defineProperty;
+var __defProps = Object.defineProperties;
+var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues = (a, b) => {
+  for (var prop in b || (b = {}))
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
+  if (__getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(b)) {
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    }
+  return a;
+};
+var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
 };
 
-function capitalize(value) {
-  if (!value) return 'Unknown';
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
-}
-
-function getTmdbTitleYear(tmdbId, mediaType) {
-  const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
-  const url = `${TMDB_API_BASE}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=es-ES`;
-
-  return fetch(url)
-    .then(function (res) {
-      return res.ok ? res.json() : null;
-    })
-    .then(function (json) {
-      if (!json) return { title: String(tmdbId), year: null };
-      const title = endpoint === 'tv' ? (json.name || String(tmdbId)) : (json.title || String(tmdbId));
-      const date = endpoint === 'tv' ? json.first_air_date : json.release_date;
-      const year = date && typeof date === 'string' ? date.split('-')[0] : null;
-      return { title: title, year: year };
-    })
-    .catch(function () {
-      return { title: String(tmdbId), year: null };
-    });
-}
-
-function getImdbId(tmdbId, mediaType) {
-  const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
-  const url = `${TMDB_API_BASE}/${endpoint}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`;
-
-  return fetch(url)
-    .then(function (res) {
-      return res.ok ? res.json() : null;
-    })
-    .then(function (json) {
-      return json && json.imdb_id ? json.imdb_id : null;
-    })
-    .catch(function () {
-      return null;
-    });
-}
-
-function buildEmbedUrl(imdbId, mediaType, seasonNum, episodeNum) {
-  if (mediaType === 'tv' && seasonNum != null && episodeNum != null) {
-    const ep = String(episodeNum).padStart(2, '0');
-    return `${BASE_URL}/f/${imdbId}-${seasonNum}x${ep}`;
-  }
-  return `${BASE_URL}/f/${imdbId}`;
-}
-
-function extractDataLinkJson(html) {
-  if (!html) return null;
-
-  // dataLink = [...];
-  const match = html.match(/dataLink\s*=\s*(\[[\s\S]*?\]);/);
-  if (!match || !match[1]) return null;
-
-  try {
-    return JSON.parse(match[1]);
-  } catch (_) {
-    return null;
-  }
-}
-
-function decryptLinks(encryptedLinks) {
-  if (!encryptedLinks || encryptedLinks.length === 0) return Promise.resolve([]);
-
-  return fetch(`${BASE_URL}/api/decrypt`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': DEFAULT_HEADERS['User-Agent'],
-      'Referer': DEFAULT_HEADERS['Referer']
-    },
-    body: JSON.stringify({ links: encryptedLinks })
-  })
-    .then(function (res) {
-      return res.ok ? res.json() : null;
-    })
-    .then(function (json) {
-      if (!json || !json.success || !Array.isArray(json.links)) return [];
-      return json.links.map(function (item) {
-        return item && item.link ? item.link : null;
-      }).filter(Boolean);
-    })
-    .catch(function () {
-      return [];
-    });
-}
-
-function unpackPackerScript(script) {
-  if (!script || script.indexOf('eval(function(p,a,c,k,e,d)') === -1) return null;
-
-  // Convert `eval(function(...)... )` into `function(...)...` call and execute.
-  // The Dean Edwards packer function returns the unpacked source as a string.
-  try {
-    const start = script.indexOf('eval(');
-    const end = script.lastIndexOf(')');
-    if (start === -1 || end === -1 || end <= start + 5) return null;
-
-    const innerExpression = script.substring(start + 5, end);
-    const unpacked = Function('return (' + innerExpression + ');')();
-    return typeof unpacked === 'string' ? unpacked : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function absolutizeUrl(url, base) {
-  if (!url) return null;
-  if (url.indexOf('http://') === 0 || url.indexOf('https://') === 0) return url;
-  if (url.indexOf('//') === 0) return 'https:' + url;
-
-  try {
-    return new URL(url, base).toString();
-  } catch (_) {
-    return null;
-  }
-}
-
-function extractPlayableUrlsFromText(text, baseUrl) {
-  if (!text) return [];
-  const found = [];
-
-  const directPattern = /(https?:\/\/[^'"\s]+(?:\.m3u8|\.mp4|\.mkv|\.webm|\.mpd)[^'"\s]*)/gi;
-  const relativePattern = /(["']\/?[^"']+(?:\.m3u8|\.mp4|\.mkv|\.webm|\.mpd)[^"']*["'])/gi;
-
-  let match;
-  while ((match = directPattern.exec(text)) !== null) {
-    if (match[1]) found.push(match[1]);
-  }
-
-  while ((match = relativePattern.exec(text)) !== null) {
-    const raw = match[1].replace(/^['"]|['"]$/g, '');
-    const abs = absolutizeUrl(raw, baseUrl);
-    if (abs) found.push(abs);
-  }
-
-  const unique = [];
-  const seen = new Set();
-  found.forEach(function (u) {
-    const clean = (u || '').replace(/\\\//g, '/');
-    if (!clean) return;
-    if (seen.has(clean)) return;
-    seen.add(clean);
-    unique.push(clean);
+// src/providers/animelok/index.js
+var cheerio = require("cheerio-without-node-native");
+var BASE_URL = "https://Animelok.xyz";
+var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+function fetchWithTimeout(_0) {
+  return __async(this, arguments, function* (url, options = {}, timeout = 1e4) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = yield fetch(url, __spreadProps(__spreadValues({}, options), {
+        signal: controller.signal
+      }));
+      clearTimeout(id);
+      return response;
+    } catch (error) {
+      clearTimeout(id);
+      throw error;
+    }
   });
-
-  return unique;
 }
-
-function resolveEmbedPageUrls(embedUrl) {
-  if (!embedUrl) return Promise.resolve([]);
-
-  return fetch(embedUrl, {
-    headers: {
-      'User-Agent': DEFAULT_HEADERS['User-Agent'],
-      'Referer': BASE_URL + '/'
-    }
-  })
-    .then(function (res) {
-      return res.ok ? res.text() : null;
-    })
-    .then(function (html) {
-      if (!html) return [];
-
-      const directUrls = extractPlayableUrlsFromText(html, embedUrl);
-      if (directUrls.length > 0) return directUrls;
-
-      // Some hosts pack the player script with Dean Edwards packer.
-      const packedScripts = [];
-      const scriptBlockRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-      let scriptMatch;
-      while ((scriptMatch = scriptBlockRegex.exec(html)) !== null) {
-        const code = scriptMatch[1] || '';
-        if (code.indexOf('eval(function(p,a,c,k,e,d)') !== -1) {
-          packedScripts.push(code);
-        }
-      }
-      let unpackedUrls = [];
-
-      packedScripts.forEach(function (script) {
-        const unpacked = unpackPackerScript(script);
-        if (!unpacked) return;
-        unpackedUrls = unpackedUrls.concat(extractPlayableUrlsFromText(unpacked, embedUrl));
+function search(query) {
+  return __async(this, null, function* () {
+    console.log(`[Animelok] Searching for: ${query}`);
+    try {
+      const searchUrl = `${BASE_URL}/search?keyword=${encodeURIComponent(query)}`;
+      const response = yield fetchWithTimeout(searchUrl, {
+        headers: { "User-Agent": USER_AGENT }
       });
-
-      if (unpackedUrls.length > 0) return unpackedUrls;
-
+      const html = yield response.text();
+      const $ = cheerio.load(html);
+      const results = [];
+      $("a.group.relative").each((i, el) => {
+        const title = $(el).find("h3").text().trim();
+        const href = $(el).attr("href");
+        const poster = $(el).find("img").attr("src");
+        if (href && title) {
+          const slug = href.includes("/anime/") ? href.split("/anime/")[1].split("?")[0].split("/")[0] : href.split("/").pop();
+          results.push({
+            title,
+            id: slug,
+            poster,
+            type: "tv"
+          });
+        }
+      });
+      return results;
+    } catch (error) {
+      console.error("[Animelok] Search error:", error.message);
       return [];
-    })
-    .catch(function () {
-      return [];
-    });
-}
-
-function detectType(url) {
-  if (!url) return null;
-  const value = url.toLowerCase();
-  if (value.indexOf('.m3u8') !== -1) return 'hls';
-  if (value.indexOf('.mpd') !== -1) return 'dash';
-  if (value.indexOf('.mp4') !== -1 || value.indexOf('.mkv') !== -1 || value.indexOf('.webm') !== -1) return 'direct';
-  return null;
-}
-
-function isLikelyVideoUrl(url) {
-  if (!url || typeof url !== 'string') return false;
-  const value = url.toLowerCase();
-  return (
-    value.startsWith('http://') ||
-    value.startsWith('https://')
-  ) && (
-    value.indexOf('.m3u8') !== -1 ||
-    value.indexOf('.mp4') !== -1 ||
-    value.indexOf('.mkv') !== -1 ||
-    value.indexOf('.webm') !== -1 ||
-    value.indexOf('.mpd') !== -1 ||
-    value.indexOf('/playlist') !== -1 ||
-    value.indexOf('manifest') !== -1
-  );
-}
-
-function validateVideoCandidate(url) {
-  if (!url || typeof url !== 'string') return Promise.resolve(null);
-
-  // Fast-path for explicit media extensions.
-  if (isLikelyVideoUrl(url)) {
-    return Promise.resolve({ url: url, type: detectType(url) || 'direct' });
-  }
-
-  // Fallback: probe the URL and accept only if content-type indicates media.
-  return fetch(url, {
-    method: 'GET',
-    headers: {
-      'Range': 'bytes=0-1',
-      'User-Agent': DEFAULT_HEADERS['User-Agent'],
-      'Referer': DEFAULT_HEADERS['Referer']
     }
-  })
-    .then(function (res) {
-      if (!res || !res.ok) return null;
-      const contentType = (res.headers.get('content-type') || '').toLowerCase();
-      const finalUrl = res.url || url;
-
-      if (
-        contentType.indexOf('video/') !== -1 ||
-        contentType.indexOf('application/vnd.apple.mpegurl') !== -1 ||
-        contentType.indexOf('application/x-mpegurl') !== -1 ||
-        contentType.indexOf('application/dash+xml') !== -1
-      ) {
+  });
+}
+var TMDB_API_KEY = "1b3113663c9004682ed61086cf967c44";
+function getTMDBDetails(id, type, retries = 3) {
+  return __async(this, null, function* () {
+    const url = `https://api.themoviedb.org/3/${type}/${id}?api_key=${TMDB_API_KEY}`;
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = yield fetchWithTimeout(url, {}, 8e3);
+        if (!res.ok)
+          throw new Error(`Status ${res.status}`);
+        const data = yield res.json();
         return {
-          url: finalUrl,
-          type: detectType(finalUrl) || (contentType.indexOf('mpegurl') !== -1 ? 'hls' : 'direct')
+          title: data.name || data.title,
+          year: (data.release_date || data.first_air_date || "").split("-")[0]
         };
+      } catch (e) {
+        console.error(`[Animelok] TMDB fetch attempt ${i + 1} failed:`, e.message);
+        if (i === retries - 1)
+          return null;
+        yield new Promise((resolve) => setTimeout(resolve, 1e3 * (i + 1)));
       }
-
-      return null;
-    })
-    .catch(function () {
-      return null;
-    });
-}
-
-function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
-  const effectiveType = mediaType === 'tv' ? 'tv' : 'movie';
-  const season = seasonNum != null ? Number(seasonNum) : null;
-  const episode = episodeNum != null ? Number(episodeNum) : null;
-
-  console.log(`[Pelisplushd] Request: tmdb=${tmdbId}, type=${effectiveType}, season=${season}, episode=${episode}`);
-
-  return Promise.all([
-    getImdbId(tmdbId, effectiveType),
-    getTmdbTitleYear(tmdbId, effectiveType)
-  ]).then(function (results) {
-    const imdbId = results[0];
-    const info = results[1];
-
-    if (!imdbId) {
-      console.log('[Pelisplushd] No IMDB id found for TMDB:', tmdbId);
-      return [];
     }
-
-    const pageUrl = buildEmbedUrl(imdbId, effectiveType, season, episode);
-    console.log('[Pelisplushd] Fetching page:', pageUrl);
-
-    return fetch(pageUrl, { headers: DEFAULT_HEADERS })
-      .then(function (res) {
-        return res.ok ? res.text() : null;
-      })
-      .then(function (html) {
-        const groups = extractDataLinkJson(html);
-        if (!groups || !Array.isArray(groups) || groups.length === 0) {
-          console.log('[Pelisplushd] dataLink not found');
+    return null;
+  });
+}
+function getStreams(id, type, season, episode) {
+  return __async(this, null, function* () {
+    let animeSlug = id;
+    if (/^\d+$/.test(id)) {
+      console.log(`[Animelok] numeric ID detected (${id}), fetching TMDB details...`);
+      const details = yield getTMDBDetails(id, type);
+      if (details) {
+        console.log(`[Animelok] TMDB Title trace: ${details.title}. Searching on Animelok...`);
+        const searchResults = yield search(details.title);
+        if (searchResults.length > 0) {
+          let match = searchResults[0];
+          if (season > 1) {
+            const seasonSearch = searchResults.find(
+              (r) => r.title.toLowerCase().includes(`season ${season}`) || r.title.toLowerCase().includes(` s${season}`)
+            );
+            if (seasonSearch)
+              match = seasonSearch;
+          }
+          animeSlug = match.id;
+          console.log(`[Animelok] Found matching slug: ${animeSlug} for season ${season}`);
+        } else {
+          console.warn(`[Animelok] No search results found for: ${details.title}`);
           return [];
         }
-
-        const decryptJobs = [];
-        groups.forEach(function (group) {
-          const language = group && group.video_language ? group.video_language : 'Unknown';
-          const embeds = group && Array.isArray(group.sortedEmbeds) ? group.sortedEmbeds : [];
-          const encryptedLinks = embeds
-            .map(function (x) { return x && x.link ? x.link : null; })
-            .filter(Boolean);
-
-          if (encryptedLinks.length > 0) {
-            decryptJobs.push(
-              decryptLinks(encryptedLinks).then(function (urls) {
-                return { language: language, urls: urls };
-              })
-            );
-          }
-        });
-
-        if (decryptJobs.length === 0) return [];
-
-        return Promise.all(decryptJobs)
-          .then(function (languageSets) {
-            const candidates = [];
-            languageSets.forEach(function (set) {
-              const lang = capitalize(set.language);
-              (set.urls || []).forEach(function (url) {
-                candidates.push({ language: lang, url: url });
-              });
-            });
-
-            return Promise.all(candidates.map(function (c) {
-              return resolveEmbedPageUrls(c.url)
-                .then(function (resolvedUrls) {
-                  if (!resolvedUrls || resolvedUrls.length === 0) {
-                    return [c.url];
-                  }
-                  return resolvedUrls;
-                })
-                .then(function (urls) {
-                  return Promise.all(urls.map(function (url) {
-                    return validateVideoCandidate(url).then(function (validated) {
-                      if (!validated) return null;
-                      return {
-                        language: c.language,
-                        url: validated.url,
-                        type: validated.type
-                      };
-                    });
-                  }));
-                })
-                .then(function (items) {
-                  return items.filter(Boolean);
-                });
-            })).then(function (nested) {
-              return nested.reduce(function (acc, item) {
-                return acc.concat(item || []);
-              }, []);
-            });
-          })
-          .then(function (validatedList) {
-            const uniq = new Set();
-            const streams = [];
-
-            validatedList.filter(Boolean).forEach(function (item) {
-              const key = `${item.language}|${item.url}`;
-              if (uniq.has(key)) return;
-              uniq.add(key);
-
-              const title = (effectiveType === 'tv' && season != null && episode != null)
-                ? `${info.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
-                : (info.year ? `${info.title} (${info.year})` : info.title);
-
-              streams.push({
-                name: `Pelisplushd ${item.language}`,
-                title: title,
-                url: item.url,
-                quality: item.type === 'hls' ? 'Adaptive' : '1080p',
-                type: item.type === 'hls' ? 'hls' : 'direct',
-                headers: {
-                  'User-Agent': DEFAULT_HEADERS['User-Agent'],
-                  'Referer': BASE_URL + '/'
-                },
-                provider: 'peliplushd'
-              });
-            });
-
-            console.log(`[Pelisplushd] Valid streams: ${streams.length}`);
-            return streams;
-          });
+      } else {
+        return [];
+      }
+    }
+    const apiUrl = `${BASE_URL}/anime/${animeSlug}/episodes/${episode}`;
+    console.log(`Fetching streams for ${animeSlug} episode ${episode} from ${apiUrl}...`);
+    try {
+      const response = yield fetchWithTimeout(apiUrl, {
+        headers: {
+          "Referer": `${BASE_URL}/watch/${animeSlug}?ep=${episode}`,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json"
+        }
       });
-  }).catch(function (error) {
-    console.error('[Pelisplushd] Error:', error && error.message ? error.message : String(error));
-    return [];
+      const data = yield response.json();
+      const episodeData = data.episode;
+      if (!episodeData || !episodeData.servers) {
+        return [];
+      }
+      const streams = [];
+      const subtitles = (episodeData.subtitles || []).map((sub) => ({
+        url: sub.url,
+        label: sub.name,
+        lang: sub.name,
+        language: sub.name,
+        format: sub.url.endsWith(".vtt") ? "vtt" : "srt"
+      }));
+      for (const server of episodeData.servers) {
+        const serverName = server.name || "Unknown";
+        const languages = server.languages || [];
+        const hasSubtitles = subtitles.length > 0;
+        const commonHeaders = {
+          "Referer": `${BASE_URL}/watch/${animeSlug}?ep=${episode}`,
+          "User-Agent": USER_AGENT
+        };
+        if (server.url.includes("zephyrflick.top") || server.url.includes("as-cdn")) {
+          const videoIdMatch = server.url.match(/\/video\/([a-f0-9]{32})/);
+          if (videoIdMatch) {
+            const videoId = videoIdMatch[1];
+            const stream = yield extractAsCdnStream(videoId, serverName, data.anime || data.movie, season, episode, languages, hasSubtitles);
+            if (stream) {
+              const quality = stream.quality || "Auto";
+              stream.quality = quality;
+              stream.name = `AnimeLok - ${serverName} - ${quality}`;
+              stream.subtitles = subtitles;
+              stream.headers = __spreadProps(__spreadValues({}, commonHeaders), {
+                "Referer": `https://as-cdn21.top/video/${videoId}`
+              });
+              streams.push(stream);
+            }
+          }
+        } else if (server.url.startsWith("[") && server.url.includes(".m3u8")) {
+          try {
+            const sources = JSON.parse(server.url);
+            for (const source of sources) {
+              let url = source.url;
+              const quality = source.quality || "Auto";
+              streams.push({
+                name: `AnimeLok - ${serverName} - ${quality}`,
+                quality,
+                title: formatTitle(data.anime || data.movie, quality, season, episode, languages, hasSubtitles),
+                url,
+                type: "hls",
+                headers: commonHeaders,
+                subtitles
+              });
+            }
+          } catch (e) {
+            console.error("Failed to parse direct HLS sources:", e.message);
+          }
+        } else if (server.url.includes(".m3u8")) {
+          let masterUrl = server.url;
+          streams.push({
+            name: `AnimeLok - ${serverName} - Auto`,
+            quality: "Auto",
+            title: formatTitle(data.anime || data.movie, "Auto", season, episode, languages, hasSubtitles),
+            url: masterUrl,
+            type: "hls",
+            headers: commonHeaders,
+            subtitles
+          });
+          try {
+            const resolved = yield resolveHlsPlaylist(server.url, commonHeaders);
+            if (resolved && resolved.variants && resolved.variants.length > 0) {
+              for (const variant of resolved.variants) {
+                let vUrl = variant.url;
+                const extraInfo = variant.extraInfo ? ` | ${variant.extraInfo}` : "";
+                streams.push({
+                  name: `AnimeLok - ${serverName} - ${variant.quality}`,
+                  quality: variant.quality,
+                  title: formatTitle(data.anime || data.movie, variant.quality, season, episode, languages, hasSubtitles, extraInfo),
+                  url: vUrl,
+                  type: "hls",
+                  headers: commonHeaders,
+                  subtitles
+                });
+              }
+            }
+          } catch (e) {
+            console.error("HLS resolution failed:", e.message);
+          }
+        }
+      }
+      return streams;
+    } catch (e) {
+      console.error("getStreams failed:", e.message);
+      return [];
+    }
   });
 }
-
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { getStreams };
-} else {
-  global.PelisplushdScraperModule = { getStreams };
+function extractAsCdnStream(videoId, serverName, animeInfo, season, episode, languages, hasSubtitles) {
+  return __async(this, null, function* () {
+    const embedUrl = `https://as-cdn21.top/video/${videoId}`;
+    const apiUrl = `https://as-cdn21.top/player/index.php?data=${videoId}&do=getVideo`;
+    try {
+      const response = yield fetchWithTimeout(apiUrl, {
+        method: "POST",
+        body: `hash=${videoId}&r=${encodeURIComponent(BASE_URL)}/`,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Referer": embedUrl,
+          "X-Requested-With": "XMLHttpRequest",
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      });
+      const data = yield response.json();
+      if (data && data.videoSource) {
+        return {
+          name: `AnimeLok - ${serverName} - Auto`,
+          quality: "Auto",
+          title: formatTitle(animeInfo, "Auto", season, episode, languages, hasSubtitles),
+          url: data.videoSource,
+          type: "hls"
+        };
+      }
+    } catch (e) {
+      console.error(`Failed to extract from as-cdn (${videoId}):`, e.message);
+    }
+    return null;
+  });
 }
+function formatTitle(animeInfo, quality, season, episode, languages, hasSubtitles, extraInfo = "") {
+  const title = animeInfo && animeInfo.title ? animeInfo.title : "Unknown";
+  const s = String(season || 1).padStart(2, "0");
+  const e = String(episode || 1).padStart(2, "0");
+  const epLabel = ` - S${s} E${e}`;
+  let langStr = languages.join("/") || "Unknown";
+  if (hasSubtitles)
+    langStr += " + ESub";
+  return `Animelok (${quality})
+\u{1F4F9}: ${title}${epLabel}
+\u{1F3A7}: ${langStr}${extraInfo}`;
+}
+function parseCodecs(codecString) {
+  if (!codecString)
+    return "";
+  const codecs = codecString.split(",").map((c) => c.trim().toLowerCase());
+  const info = [];
+  for (const codec of codecs) {
+    if (codec.startsWith("avc"))
+      info.push("H.264");
+    else if (codec.startsWith("hev") || codec.startsWith("hvc"))
+      info.push("H.265");
+    else if (codec.startsWith("mp4a"))
+      info.push("AAC");
+    else if (codec.startsWith("ec-3"))
+      info.push("E-AC3");
+    else if (codec.startsWith("ac-3"))
+      info.push("AC3");
+  }
+  return info.join("/");
+}
+function resolveHlsPlaylist(_0) {
+  return __async(this, arguments, function* (masterUrl, headers = {}) {
+    try {
+      const response = yield fetchWithTimeout(masterUrl, { headers }, 5e3);
+      if (!response.ok)
+        return null;
+      const content = yield response.text();
+      if (!content.includes("#EXTM3U") || !content.includes("#EXT-X-STREAM-INF"))
+        return null;
+      const variants = [];
+      const lines = content.split("\n");
+      const audioInfo = {};
+      const audioMatches = content.matchAll(/#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="([^"]+)",NAME="([^"]+)"/g);
+      for (const match of audioMatches) {
+        audioInfo[match[1]] = match[2];
+      }
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.includes("#EXT-X-STREAM-INF")) {
+          let quality = "Unknown";
+          const resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/i);
+          if (resMatch) {
+            const height = parseInt(resMatch[2]);
+            if (height >= 2160)
+              quality = "4K";
+            else if (height >= 1080)
+              quality = "1080p";
+            else if (height >= 720)
+              quality = "720p";
+            else if (height >= 480)
+              quality = "480p";
+            else
+              quality = `${height}p`;
+          }
+          if (quality === "Unknown") {
+            const nameMatch = line.match(/NAME="([^"]+)"/i);
+            if (nameMatch)
+              quality = nameMatch[1];
+          }
+          const codecMatch = line.match(/CODECS="([^"]+)"/i);
+          const codecStr = codecMatch ? parseCodecs(codecMatch[1]) : "";
+          const audioMatch = line.match(/AUDIO="([^"]+)"/i);
+          const audioName = audioMatch ? audioInfo[audioMatch[1]] : "";
+          let extraInfo = codecStr;
+          if (audioName)
+            extraInfo += extraInfo ? ` | ${audioName}` : audioName;
+          let j = i + 1;
+          while (j < lines.length && (lines[j].trim().startsWith("#") || !lines[j].trim())) {
+            j++;
+          }
+          if (j < lines.length) {
+            let variantPath = lines[j].trim();
+            if (variantPath) {
+              let variantUrl = variantPath;
+              if (!variantUrl.startsWith("http")) {
+                const lastSlash = masterUrl.lastIndexOf("/");
+                const baseUrl = masterUrl.substring(0, lastSlash + 1);
+                variantUrl = baseUrl + variantUrl;
+              }
+              if (!variants.some((v) => v.url === variantUrl)) {
+                variants.push({ url: variantUrl, quality, extraInfo });
+              }
+            }
+          }
+          i = j;
+        }
+      }
+      return { variants };
+    } catch (e) {
+      return null;
+    }
+  });
+}
+module.exports = {
+  search,
+  getStreams
+};
