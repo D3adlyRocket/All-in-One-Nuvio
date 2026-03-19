@@ -94,15 +94,14 @@
       "contentLanguage": ["en"]
     },
     {
-      "id": "animelok",
-      "name": "AnimeLok",
-      "description": "AnimeLok TV episodes via AnimeLok servers",
+      "id": "allmovieland",
+      "name": "AllMovieLand",
+      "description": "AllMovieLand streaming provider with multi-language support",
       "version": "1.0.0",
       "author": "Nuvio Team",
       "supportedTypes": ["movie", "tv"],
-      "filename": "providers/animelok.js",
+      "filename": "providers/allmovieland.js",
       "enabled": true,
-      "limited": true,
       "formats": ["mp4", "m3u8"],
       "logo": "",
       "contentLanguage": ["en"]
