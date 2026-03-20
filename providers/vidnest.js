@@ -1,528 +1,441 @@
-// Vidnest Scraper for Nuvio Local Scrapers
-// React Native compatible version - Promise-based approach only
-// Extracts streaming links using TMDB ID for Vidnest servers with AES-GCM decryption
+// Cinevibe Scraper for Nuvio Local Scrapers
+// React Native compatible version - Promise-based approach
 
-// TMDB API Configuration
-const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
+// Constants
+const BASE_URL = 'https://cinevibe.asia';
+const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c'; // Same key used by other providers
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// Vidnest Configuration
-const VIDNEST_BASE_URL = 'https://first.vidnest.fun';
-const VIDNEST_PROXY_URL = 'https://vidnest.animanga.fun/proxy';
-const PASSPHRASE = 'A7kP9mQeXU2BWcD4fRZV+Sg8yN0/M5tLbC1HJQwYe6o=';
-const SERVERS = ['hollymoviehd', 'primesrc', 'ophim', 'flixhq', 'vidlink', 'rogflix'];
+const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+const BROWSER_FINGERPRINT = "eyJzY3JlZW4iOiIzNjB4ODA2eDI0Iiwi";
+const SESSION_ENTROPY = "pjght152dw2rb.ssst4bzleDI0Iiwibv78";
 
-// Working headers for Vidnest API (exact headers from browser)
+// Working headers for Cinevibe requests
 const WORKING_HEADERS = {
-    'accept': '*/*',
-    'accept-encoding': 'gzip, deflate, br, zstd',
-    'accept-language': 'en-GB,en-US;q=0.9,en;q=0.8',
-    'origin': 'https://vidnest.fun',
-    'referer': 'https://vidnest.fun/',
-    'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-    'sec-ch-ua-mobile': '?1',
-    'sec-ch-ua-platform': '"Android"',
-    'sec-fetch-dest': 'empty',
-    'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'same-site',
-    'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36'
+    'Referer': BASE_URL + '/',
+    'User-Agent': USER_AGENT,
+    'X-CV-Fingerprint': BROWSER_FINGERPRINT,
+    'X-CV-Session': SESSION_ENTROPY,
+    'X-Requested-With': 'XMLHttpRequest'
 };
 
-// Headers for stream playback (separate from API headers)
-const PLAYBACK_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-    'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'identity',
-    'Connection': 'keep-alive',
-    'Sec-Fetch-Dest': 'video',
-    'Sec-Fetch-Mode': 'no-cors',
-    'Sec-Fetch-Site': 'cross-site',
-    'DNT': '1'
-};
+// Utility Functions
 
-// React Native-safe Base64 utilities (no Buffer dependency)
-const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+/**
+ * A 32-bit FNV-1a Hash Function
+ */
+function fnv1a32(s) {
+    let hash = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+        hash ^= s.charCodeAt(i);
+        hash = (hash + (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)) & 0xffffffff;
+    }
+    return hash.toString(16).padStart(8, '0');
+}
 
-function base64ToBytes(base64) {
-    if (!base64) return new Uint8Array(0);
-    
-    // Remove padding
-    let input = String(base64).replace(/=+$/, '');
-    let output = '';
-    let bc = 0, bs, buffer, idx = 0;
-    
-    while ((buffer = input.charAt(idx++))) {
-        buffer = BASE64_CHARS.indexOf(buffer);
-        if (~buffer) {
-            bs = bc % 4 ? bs * 64 + buffer : buffer;
-            if (bc++ % 4) {
-                output += String.fromCharCode(255 & (bs >> ((-2 * bc) & 6)));
-            }
+/**
+ * ROT13 encoding function
+ */
+function rot13(str) {
+    return str.replace(/[A-Za-z]/g, function(char) {
+        const code = char.charCodeAt(0);
+        if (code >= 65 && code <= 90) {
+            return String.fromCharCode(((code - 65 + 13) % 26) + 65);
+        } else if (code >= 97 && code <= 122) {
+            return String.fromCharCode(((code - 97 + 13) % 26) + 97);
         }
-    }
-    
-    // Convert string to bytes
-    const bytes = new Uint8Array(output.length);
-    for (let i = 0; i < output.length; i++) {
-        bytes[i] = output.charCodeAt(i);
-    }
-    return bytes;
+        return char;
+    });
 }
 
-function bytesToBase64(bytes) {
-    if (!bytes || bytes.length === 0) return '';
-    
-    let output = '';
-    let i = 0;
-    const len = bytes.length;
-    
-    while (i < len) {
-        const a = bytes[i++];
-        const b = i < len ? bytes[i++] : 0;
-        const c = i < len ? bytes[i++] : 0;
-        
-        const bitmap = (a << 16) | (b << 8) | c;
-        
-        output += BASE64_CHARS.charAt((bitmap >> 18) & 63);
-        output += BASE64_CHARS.charAt((bitmap >> 12) & 63);
-        output += i - 2 < len ? BASE64_CHARS.charAt((bitmap >> 6) & 63) : '=';
-        output += i - 1 < len ? BASE64_CHARS.charAt(bitmap & 63) : '=';
-    }
-    
-    return output;
-}
-
-// Node.js compatible atob function
-function atob(str) {
-    return base64ToBytes(str).map(byte => String.fromCharCode(byte)).join('');
-}
-
-// AES-GCM Decryption using server (React Native compatible)
-function decryptAesGcm(encryptedB64, passphraseB64) {
-    console.log('[Vidnest] Starting AES-GCM decryption via server...');
-    
-    // Use local server for development, remote for production
-    const decryptServerUrl = process.env.DECRYPT_SERVER_URL || 'https://aesdec.nuvioapp.space/decrypt';
-    
-    return fetch(decryptServerUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            encryptedData: encryptedB64,
-            passphrase: passphraseB64
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) throw new Error(data.error);
-        console.log('[Vidnest] Server decryption successful');
-        return data.decrypted;
-    })
-    .catch(error => {
-        console.error(`[Vidnest] Server decryption failed: ${error.message}`);
+/**
+ * Base64 encoding helper (using btoa for browser/React Native)
+ */
+function base64Encode(str) {
+    try {
+        // For React Native, we need to handle Unicode properly
+        const utf8Bytes = unescape(encodeURIComponent(str));
+        return btoa(utf8Bytes);
+    } catch (error) {
+        console.error('[Cinevibe] Base64 encode error:', error);
         throw error;
-    });
-}
-
-// Validate stream URL accessibility
-function validateStreamUrl(url, headers) {
-    console.log(`[Vidnest] Validating stream URL: ${url.substring(0, 60)}...`);
-    
-    // Skip validation for HLS streams (.m3u8) - they're often protected and return 403
-    // but work fine in video players
-    if (url.includes('.m3u8') || url.includes('/streamsvr/') || url.includes('/stream2/')) {
-        console.log(`[Vidnest] Skipping validation for HLS/protected stream`);
-        return Promise.resolve(true);
     }
-    
-    return fetch(url, {
-        method: 'HEAD',
-        headers: headers,
-        timeout: 5000
-    })
-    .then(response => {
-        // Accept 200 OK, 206 Partial Content, 302 redirects, or 403 (protected but valid)
-        const isValid = response.ok || response.status === 206 || response.status === 302 || response.status === 403;
-        console.log(`[Vidnest] URL validation result: ${response.status} - ${isValid ? 'VALID' : 'INVALID'}`);
-        return isValid;
-    })
-    .catch(error => {
-        console.log(`[Vidnest] URL validation failed: ${error.message}`);
-        // For protected streams, assume valid even if validation fails
-        if (url.includes('.m3u8') || url.includes('/streamsvr/') || url.includes('/stream2/')) {
-            return true;
-        }
-        return false;
-    });
 }
 
-// Helper function to make HTTP requests
-function makeRequest(url, options = {}) {
-    const defaultHeaders = { ...WORKING_HEADERS };
-    
-    return fetch(url, {
-        method: options.method || 'GET',
-        headers: { ...defaultHeaders, ...options.headers },
-        ...options
-    }).then(function(response) {
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        return response;
-    }).catch(function(error) {
-        console.error(`[Vidnest] Request failed for ${url}: ${error.message}`);
+/**
+ * Base64 decoding helper (using atob for browser/React Native)
+ */
+function base64Decode(str) {
+    try {
+        const decoded = atob(str);
+        return decodeURIComponent(escape(decoded));
+    } catch (error) {
+        console.error('[Cinevibe] Base64 decode error:', error);
         throw error;
-    });
+    }
 }
 
-// Get movie/TV show details from TMDB
+/**
+ * Deterministic string obfuscator using layered reversible encodings
+ * Equivalent to Python's custom_encode function
+ */
+function customEncode(e) {
+    // Step 1: Base64 encode
+    let encoded = base64Encode(e);
+    
+    // Step 2: Reverse string
+    encoded = encoded.split('').reverse().join('');
+    
+    // Step 3: ROT13 encode
+    encoded = rot13(encoded);
+    
+    // Step 4: Base64 encode again
+    encoded = base64Encode(encoded);
+    
+    // Step 5: Replace characters
+    encoded = encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    
+    return encoded;
+}
+
+/**
+ * Get movie/TV show details from TMDB
+ */
 function getTMDBDetails(tmdbId, mediaType) {
     const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
-    const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`;
+    const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}`;
     
-    return makeRequest(url)
-        .then(function(response) {
-            return response.json();
-        })
-        .then(function(data) {
-            const title = mediaType === 'tv' ? data.name : data.title;
-            const releaseDate = mediaType === 'tv' ? data.first_air_date : data.release_date;
-            const year = releaseDate ? parseInt(releaseDate.split('-')[0]) : null;
-            
-            return {
-                title: title,
-                year: year,
-                imdbId: data.external_ids?.imdb_id || null
-            };
-        });
-}
-
-// Extract quality from URL or response
-function extractQuality(url) {
-    if (!url) return 'Unknown';
+    console.log(`[Cinevibe] Fetching TMDB details for ${mediaType} ID: ${tmdbId}`);
     
-    // Try to extract quality from URL patterns
-    const qualityPatterns = [
-        /(\d{3,4})p/i,  // 1080p, 720p, etc.
-        /(\d{3,4})k/i,  // 1080k, 720k, etc.
-        /quality[_-]?(\d{3,4})/i,  // quality-1080, quality_720, etc.
-        /res[_-]?(\d{3,4})/i,  // res-1080, res_720, etc.
-        /(\d{3,4})x\d{3,4}/i,  // 1920x1080, 1280x720, etc.
-    ];
-
-    for (const pattern of qualityPatterns) {
-        const match = url.match(pattern);
-        if (match) {
-            const qualityNum = parseInt(match[1]);
-            if (qualityNum >= 240 && qualityNum <= 4320) {
-                return `${qualityNum}p`;
-            }
+    return fetch(url, {
+        method: 'GET',
+        headers: {
+            'User-Agent': USER_AGENT,
+            'Accept': 'application/json'
         }
-    }
-
-    // Additional quality detection based on URL patterns
-    if (url.includes('1080') || url.includes('1920')) return '1080p';
-    if (url.includes('720') || url.includes('1280')) return '720p';
-    if (url.includes('480') || url.includes('854')) return '480p';
-    if (url.includes('360') || url.includes('640')) return '360p';
-    if (url.includes('240') || url.includes('426')) return '240p';
-
-    return 'Unknown';
-}
-
-// Wrap URLs through Vidnest proxy if needed (for flashstream.cc and other protected domains)
-function wrapUrlWithProxy(url) {
-    // Check if URL needs proxying (flashstream.cc returns 403 without proxy)
-    // Also check for patterns that typically need proxy (streamsvr, /pl/, etc.)
-    if (url.includes('flashstream.cc') || 
-        url.includes('streamsvr/') || 
-        url.includes('/pl/') ||
-        url.includes('rogflix') ||
-        (url.includes('lethe399key.com') && url.includes('/stream2/'))) {
-        
-        // Determine origin and referer based on URL domain
-        let origin = 'https://flashstream.cc';
-        let referer = 'https://flashstream.cc/';
-        
-        if (url.includes('lethe399key.com')) {
-            origin = 'https://lethe399key.com';
-            referer = 'https://lethe399key.com/';
+    }).then(function(response) {
+        if (!response.ok) {
+            throw new Error(`TMDB API error: ${response.status} ${response.statusText}`);
         }
+        return response.json();
+    }).then(function(data) {
+        const title = mediaType === 'tv' ? data.name : data.title;
+        const releaseDate = mediaType === 'tv' ? data.first_air_date : data.release_date;
+        const releaseYear = releaseDate ? releaseDate.split('-')[0] : null;
+        const imdbId = data.imdb_id || null;
         
-        const proxyHeaders = {
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.5',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'cross-site',
-            'origin': origin,
-            'referer': referer
+        console.log(`[Cinevibe] TMDB Info: "${title}" (${releaseYear || 'N/A'})`);
+        
+        return {
+            title: title,
+            releaseYear: releaseYear,
+            imdbId: imdbId
         };
-        
-        const encodedUrl = encodeURIComponent(url);
-        const encodedHeaders = encodeURIComponent(JSON.stringify(proxyHeaders));
-        const proxiedUrl = `${VIDNEST_PROXY_URL}?url=${encodedUrl}&headers=${encodedHeaders}`;
-        
-        console.log(`[Vidnest] Wrapping URL through proxy: ${url.substring(0, 60)}...`);
-        return proxiedUrl;
-    }
-    
-    return url;
-}
-
-// Process Vidnest API response
-function processVidnestResponse(data, serverName, mediaInfo, seasonNum, episodeNum) {
-    const streams = [];
-    
-    try {
-        console.log(`[Vidnest] Processing response from ${serverName}:`, JSON.stringify(data, null, 2));
-        
-        // Handle different response formats for different servers
-        let sources = [];
-        
-        // Standard format: sources or streams array
-        if (data.sources && Array.isArray(data.sources)) {
-            sources = data.sources;
-        } else if (data.streams && Array.isArray(data.streams)) {
-            sources = data.streams;
-        }
-        // Flixhq format: url directly in response
-        else if (data.url && typeof data.url === 'string') {
-            sources = [{ url: data.url, type: 'hls', headers: data.headers, subtitles: data.subtitles }];
-        }
-        // Vidlink format: data field contains the URL
-        else if (data.data && typeof data.data === 'string') {
-            sources = [{ url: data.data, type: 'hls', headers: data.headers, provider: data.provider }];
-        }
-        // Check if response has success field
-        else if (data.success && (data.sources || data.streams)) {
-            sources = data.sources || data.streams || [];
-        }
-        
-        if (!Array.isArray(sources) || sources.length === 0) {
-            console.log(`[Vidnest] ${serverName}: No sources/streams found in response`);
-            return streams;
-        }
-        
-        // Process each source
-        sources.forEach((source, index) => {
-            if (!source) return;
-            
-            // Extract video URL from various possible fields
-            let videoUrl = source.file || source.url || source.src || source.link;
-            
-            if (!videoUrl) {
-                console.log(`[Vidnest] ${serverName}: Source ${index} has no video URL`);
-                return;
-            }
-            
-            // Wrap URL through Vidnest proxy if needed (for flashstream.cc)
-            videoUrl = wrapUrlWithProxy(videoUrl);
-            
-            // Extract language information
-            let languageInfo = '';
-            if (source.language) {
-                languageInfo = ` [${source.language}]`;
-            }
-            
-            // Extract label/source information for better naming
-            let labelInfo = '';
-            if (source.label) {
-                labelInfo = ` - ${source.label}`;
-            } else if (source.source) {
-                labelInfo = ` - ${source.source}`;
-            }
-            
-            // Create media title
-            let mediaTitle = mediaInfo.title || 'Unknown';
-            if (mediaInfo.year) {
-                mediaTitle += ` (${mediaInfo.year})`;
-            }
-            if (seasonNum && episodeNum) {
-                mediaTitle = `${mediaInfo.title} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
-            }
-            
-            // Use "auto" quality for all streams
-            const quality = 'auto';
-            
-            streams.push({
-                name: `Vidnest ${serverName.charAt(0).toUpperCase() + serverName.slice(1)}${labelInfo}${languageInfo}`,
-                title: mediaTitle,
-                url: videoUrl,
-                quality: quality,
-                size: 'Unknown',
-                provider: 'vidnest'
-            });
-            
-            console.log(`[Vidnest] ${serverName}: Added ${quality}${languageInfo} stream: ${videoUrl.substring(0, 60)}...`);
-        });
-        
-    } catch (error) {
-        console.error(`[Vidnest] Error processing ${serverName} response: ${error.message}`);
-    }
-    
-    return streams;
-}
-
-// Fetch streams from a single server
-function fetchFromServer(serverName, mediaType, tmdbId, mediaInfo, seasonNum, episodeNum) {
-    console.log(`[Vidnest] Fetching from ${serverName}...`);
-    
-    // Build API URL
-    let apiUrl;
-    if (mediaType === 'tv' && seasonNum && episodeNum) {
-        apiUrl = `${VIDNEST_BASE_URL}/${serverName}/${mediaType}/${tmdbId}/${seasonNum}/${episodeNum}`;
-    } else {
-        apiUrl = `${VIDNEST_BASE_URL}/${serverName}/${mediaType}/${tmdbId}`;
-    }
-    
-    // Handle special query parameters for specific servers
-    // Flixhq supports ?server=upcloud parameter
-    if (serverName === 'flixhq') {
-        apiUrl += '?server=upcloud';
-    }
-    
-    console.log(`[Vidnest] ${serverName} API URL: ${apiUrl}`);
-    
-    return makeRequest(apiUrl)
-        .then(function(response) {
-            return response.text();
-        })
-        .then(function(responseText) {
-            console.log(`[Vidnest] ${serverName} response length: ${responseText.length} characters`);
-            
-            // Try to parse as JSON first
-            try {
-                const data = JSON.parse(responseText);
-                
-                // Check if response contains encrypted data
-                if (data.encrypted && data.data) {
-                    console.log(`[Vidnest] ${serverName}: Detected encrypted response, decrypting...`);
-                    
-                    return decryptAesGcm(data.data, PASSPHRASE)
-                        .then(function(decryptedText) {
-                            console.log(`[Vidnest] ${serverName}: Decryption successful`);
-                            
-                            try {
-                                const decryptedData = JSON.parse(decryptedText);
-                                return processVidnestResponse(decryptedData, serverName, mediaInfo, seasonNum, episodeNum);
-                            } catch (parseError) {
-                                console.error(`[Vidnest] ${serverName}: JSON parse error after decryption: ${parseError.message}`);
-                                return [];
-                            }
-                        });
-                } else {
-                    // Process non-encrypted response
-                    return processVidnestResponse(data, serverName, mediaInfo, seasonNum, episodeNum);
-                }
-            } catch (parseError) {
-                console.error(`[Vidnest] ${serverName}: Invalid JSON response: ${parseError.message}`);
-                return [];
-            }
-        })
-        .catch(function(error) {
-            console.error(`[Vidnest] ${serverName} error: ${error.message}`);
-            return [];
-        });
-}
-
-// Main function to extract streaming links for Nuvio
-function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
-    console.log(`[Vidnest] Starting extraction for TMDB ID: ${tmdbId}, Type: ${mediaType}${mediaType === 'tv' ? `, S:${seasonNum}E:${episodeNum}` : ''}`);
-    
-    return new Promise((resolve, reject) => {
-        // First, fetch media details from TMDB
-        getTMDBDetails(tmdbId, mediaType)
-            .then(function(mediaInfo) {
-                console.log(`[Vidnest] TMDB Info: "${mediaInfo.title}" (${mediaInfo.year || 'N/A'})`);
-                
-                // Process both servers in parallel
-                const serverPromises = SERVERS.map(serverName => {
-                    return fetchFromServer(serverName, mediaType, tmdbId, mediaInfo, seasonNum, episodeNum);
-                });
-                
-                return Promise.all(serverPromises)
-                    .then(function(results) {
-                        // Combine all streams from all servers
-                        const allStreams = [];
-                        results.forEach(streams => {
-                            allStreams.push(...streams);
-                        });
-                        
-                        // Remove duplicate streams by URL
-                        const uniqueStreams = [];
-                        const seenUrls = new Set();
-                        allStreams.forEach(stream => {
-                            if (!seenUrls.has(stream.url)) {
-                                seenUrls.add(stream.url);
-                                uniqueStreams.push(stream);
-                            }
-                        });
-                        
-                        // Validate all streams in parallel
-                        console.log(`[Vidnest] Validating ${uniqueStreams.length} streams...`);
-                        const validationPromises = uniqueStreams.map(stream => 
-                            validateStreamUrl(stream.url, PLAYBACK_HEADERS)
-                                .then(isValid => ({ stream, isValid }))
-                        );
-                        
-                        return Promise.all(validationPromises)
-                            .then(function(results) {
-                                const validStreams = results
-                                    .filter(r => r.isValid)
-                                    .map(r => r.stream);
-                                
-                                console.log(`[Vidnest] Filtered ${uniqueStreams.length - validStreams.length} broken links`);
-                                
-                                // Sort streams by quality (highest first)
-                        const getQualityValue = (quality) => {
-                            const q = quality.toLowerCase().replace(/p$/, ''); // Remove trailing 'p'
-                            
-                            // Handle specific quality names
-                            if (q === '4k' || q === '2160') return 2160;
-                            if (q === '1440') return 1440;
-                            if (q === '1080') return 1080;
-                            if (q === '720') return 720;
-                            if (q === '480') return 480;
-                            if (q === '360') return 360;
-                            if (q === '240') return 240;
-                            
-                            // Handle unknown quality (put at end)
-                            if (q === 'unknown') return 0;
-                            
-                            // Try to parse as number
-                            const numQuality = parseInt(q);
-                            if (!isNaN(numQuality) && numQuality > 0) {
-                                return numQuality;
-                            }
-                            
-                            // Default for unrecognized qualities
-                            return 1;
-                        };
-                        
-                                validStreams.sort((a, b) => {
-                                    const qualityA = getQualityValue(a.quality);
-                                    const qualityB = getQualityValue(b.quality);
-                                    return qualityB - qualityA;
-                                });
-                                
-                                console.log(`[Vidnest] Total valid streams found: ${validStreams.length}`);
-                                resolve(validStreams);
-                            });
-                    });
-            })
-            .catch(function(error) {
-                console.error(`[Vidnest] Error fetching media details: ${error.message}`);
-                resolve([]); // Return empty array on error for Nuvio compatibility
-            });
+    }).catch(function(error) {
+        console.error(`[Cinevibe] TMDB fetch error: ${error.message}`);
+        throw error;
     });
 }
 
-// Export for React Native compatibility
+/**
+ * Generate token for Cinevibe API
+ */
+function generateToken(tmdbId, title, releaseYear, mediaType) {
+    // Clean title for token (remove non-alphanumeric chars, lowercase)
+    const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    
+    // Time-based key: current time in milliseconds divided by 300000 (5 minutes)
+    const timeWindow = Math.floor(Date.now() / 300000);
+    const timeBasedKey = `${timeWindow}_${BROWSER_FINGERPRINT}_cinevibe_2025`;
+    
+    // Hash the time-based key
+    const hashedKey = fnv1a32(timeBasedKey);
+    
+    // Current time in seconds divided by 600 (10 minutes)
+    // Python: int(time.time() // 600) where time.time() is seconds
+    const timeStamp = Math.floor(Date.now() / 1000 / 600);
+    
+    // Construct token string
+    const tokenString = `${SESSION_ENTROPY}|${tmdbId}|${cleanTitle}|${releaseYear}||${hashedKey}|${timeStamp}|${BROWSER_FINGERPRINT}`;
+    
+    // Encode token
+    const token = customEncode(tokenString);
+    
+    return token;
+}
+
+/**
+ * Extract quality from stream source or URL
+ */
+function getQualityFromSource(source) {
+    if (!source) {
+        return 'Auto';
+    }
+
+    // Check label first
+    if (source.label) {
+        const label = source.label.toLowerCase();
+        if (label.includes('2160') || label.includes('4k')) return '4K';
+        if (label.includes('1440') || label.includes('2k')) return '1440p';
+        if (label.includes('1080')) return '1080p';
+        if (label.includes('720')) return '720p';
+        if (label.includes('480')) return '480p';
+        if (label.includes('360')) return '360p';
+        if (label.includes('240')) return '240p';
+        if (label.includes('auto')) return 'Auto';
+        return source.label; // Use the label as quality if it's descriptive
+    }
+
+    // Check other possible quality fields
+    if (source.quality) {
+        const quality = source.quality.toLowerCase();
+        if (quality.includes('2160') || quality.includes('4k')) return '4K';
+        if (quality.includes('1440') || quality.includes('2k')) return '1440p';
+        if (quality.includes('1080')) return '1080p';
+        if (quality.includes('720')) return '720p';
+        if (quality.includes('480')) return '480p';
+        if (quality.includes('360')) return '360p';
+        if (quality.includes('240')) return '240p';
+        return source.quality;
+    }
+
+    // Try to extract from URL
+    if (source.url) {
+        const urlMatch = source.url.match(/(\d{3,4})[pP]/);
+        if (urlMatch) {
+            const res = parseInt(urlMatch[1]);
+            if (res >= 2160) return '4K';
+            if (res >= 1440) return '1440p';
+            if (res >= 1080) return '1080p';
+            if (res >= 720) return '720p';
+            if (res >= 480) return '480p';
+            if (res >= 360) return '360p';
+            return '240p';
+        }
+    }
+
+    // Default to Auto since Cinevibe provides adaptive streaming
+    return 'Auto';
+}
+
+/**
+ * Make HEAD request to detect stream quality
+ */
+function detectStreamQuality(url) {
+    console.log(`[Cinevibe] Detecting quality for: ${url.substring(0, 50)}...`);
+
+    return fetch(url, {
+        method: 'HEAD',
+        headers: WORKING_HEADERS
+    }).then(function(response) {
+        // Try to extract quality from Content-Disposition header filename
+        let quality = 'Auto'; // Default fallback
+
+        const contentDisposition = response.headers.get('content-disposition');
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename[^;]*=([^;]*)/i);
+            if (filenameMatch) {
+                const filename = filenameMatch[1].replace(/["']/g, '');
+                // Extract quality from filename (e.g., "Movie-720P.mp4", "Movie-1080P.mp4")
+                const qualityMatch = filename.match(/-(\d{3,4})[pP]/i);
+                if (qualityMatch) {
+                    const res = parseInt(qualityMatch[1]);
+                    if (res >= 2160) quality = '4K';
+                    else if (res >= 1440) quality = '1440p';
+                    else if (res >= 1080) quality = '1080p';
+                    else if (res >= 720) quality = '720p';
+                    else if (res >= 480) quality = '480p';
+                    else if (res >= 360) quality = '360p';
+                    else quality = '240p';
+                }
+            }
+        }
+
+        // Fallback: Check Content-Type for video format hints
+        if (quality === 'Auto') {
+            const contentType = response.headers.get('content-type');
+            if (contentType) {
+                if (contentType.includes('avc1.6400') || contentType.includes('hev1.2.4.L150') || contentType.includes('hvc1.2.4.L150')) {
+                    quality = '4K';
+                } else if (contentType.includes('avc1.6400') || contentType.includes('hev1.2.4.L120') || contentType.includes('hvc1.2.4.L120')) {
+                    quality = '1440p';
+                } else if (contentType.includes('avc1.4d00') || contentType.includes('hev1.1.6.L93') || contentType.includes('hvc1.1.6.L93')) {
+                    quality = '1080p';
+                } else if (contentType.includes('avc1.4200') || contentType.includes('hev1.1.6.L63') || contentType.includes('hvc1.1.6.L63')) {
+                    quality = '720p';
+                } else if (contentType.includes('avc1.42C0')) {
+                    quality = '480p';
+                }
+            }
+        }
+
+        // Fallback: Check for resolution in custom headers
+        if (quality === 'Auto') {
+            const resolution = response.headers.get('x-resolution') || response.headers.get('resolution');
+            if (resolution) {
+                const resMatch = resolution.match(/(\d+)x(\d+)/);
+                if (resMatch) {
+                    const height = parseInt(resMatch[2]);
+                    if (height >= 2160) quality = '4K';
+                    else if (height >= 1440) quality = '1440p';
+                    else if (height >= 1080) quality = '1080p';
+                    else if (height >= 720) quality = '720p';
+                    else if (height >= 480) quality = '480p';
+                    else if (height >= 360) quality = '360p';
+                    else quality = '240p';
+                }
+            }
+        }
+
+        // Fallback: Check Content-Length for file size estimation
+        if (quality === 'Auto') {
+            const contentLength = response.headers.get('content-length');
+            if (contentLength && !isNaN(contentLength)) {
+                const sizeGB = parseInt(contentLength) / (1024 * 1024 * 1024);
+                const sizeMB = parseInt(contentLength) / (1024 * 1024);
+                if (sizeGB >= 4) quality = '4K';
+                else if (sizeGB >= 2) quality = '1440p';
+                else if (sizeGB >= 1) quality = '1080p';
+                else if (sizeMB >= 500) quality = '720p';
+                else if (sizeMB >= 200) quality = '480p';
+            }
+        }
+
+        return quality;
+
+    }).catch(function(error) {
+        console.log(`[Cinevibe] HEAD request failed, using Auto quality: ${error.message}`);
+        return 'Auto';
+    });
+}
+
+/**
+ * Fetch streaming data from Cinevibe API
+ */
+function fetchStreams(tmdbId, mediaType, seasonNum, episodeNum, mediaInfo) {
+    const { title, releaseYear } = mediaInfo;
+
+    // Generate token
+    const token = generateToken(tmdbId, title, releaseYear, mediaType);
+    const timestamp = Date.now();
+
+    // Build API URL
+    const apiUrl = `${BASE_URL}/api/stream/fetch?server=cinebox-1&type=${mediaType}&mediaId=${tmdbId}&title=${encodeURIComponent(title)}&releaseYear=${releaseYear}&_token=${token}&_ts=${timestamp}`;
+
+    console.log(`[Cinevibe] Fetching streams from API...`);
+
+    return fetch(apiUrl, {
+        method: 'GET',
+        headers: WORKING_HEADERS
+    }).then(function(response) {
+        if (!response.ok) {
+            throw new Error(`Cinevibe API error: ${response.status} ${response.statusText}`);
+        }
+        return response.json();
+    }).then(function(data) {
+        console.log(`[Cinevibe] API response received`);
+
+        if (!data || !data.sources || !Array.isArray(data.sources) || data.sources.length === 0) {
+            throw new Error('No sources found in API response');
+        }
+
+        // Process sources and detect qualities
+        const qualityPromises = data.sources.map(function(source, index) {
+            if (!source || !source.url) {
+                return Promise.resolve({
+                    index: index,
+                    source: source,
+                    quality: 'Auto'
+                });
+            }
+
+            return detectStreamQuality(source.url).then(function(quality) {
+                return {
+                    index: index,
+                    source: source,
+                    quality: quality
+                };
+            }).catch(function() {
+                return {
+                    index: index,
+                    source: source,
+                    quality: 'Auto'
+                };
+            });
+        });
+
+        return Promise.allSettled(qualityPromises).then(function(results) {
+            const streams = [];
+
+            results.forEach(function(result) {
+                if (result.status === 'fulfilled') {
+                    const { index, source, quality } = result.value;
+
+                    // Build media title
+                    let mediaTitle = title;
+                    if (mediaType === 'tv' && seasonNum && episodeNum) {
+                        mediaTitle = `${title} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
+                    } else if (releaseYear) {
+                        mediaTitle = `${title} (${releaseYear})`;
+                    }
+
+                    streams.push({
+                        name: `Cinevibe - ${quality}`,
+                        title: mediaTitle,
+                        url: source.url,
+                        type: source.url.includes('.m3u8') ? 'hls' : undefined,
+                        quality: quality,
+                        size: 'Unknown',
+                        headers: WORKING_HEADERS,
+                        provider: 'cinevibe'
+                    });
+                }
+            });
+
+            console.log(`[Cinevibe] Found ${streams.length} streams with detected qualities`);
+
+            return streams;
+        });
+    }).catch(function(error) {
+        console.error(`[Cinevibe] Stream fetch error: ${error.message}`);
+        throw error;
+    });
+}
+
+/**
+ * Main scraping function
+ * @param {string} tmdbId - TMDB ID
+ * @param {string} mediaType - "movie" or "tv"
+ * @param {number} seasonNum - Season number (TV only)
+ * @param {number} episodeNum - Episode number (TV only)
+ */
+function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
+    console.log(`[Cinevibe] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}${mediaType === 'tv' ? `, S:${seasonNum}E:${episodeNum}` : ''}`);
+    
+    // Check if TV series is supported (Python code shows it's not supported yet)
+    if (mediaType === 'tv') {
+        console.log('[Cinevibe] TV Series currently not supported');
+        return Promise.resolve([]);
+    }
+    
+    // Get TMDB details first
+    return getTMDBDetails(tmdbId, mediaType).then(function(mediaInfo) {
+        if (!mediaInfo.title || !mediaInfo.releaseYear) {
+            throw new Error('Could not extract title and release year from TMDB response');
+        }
+        
+        // Fetch streams from Cinevibe API
+        return fetchStreams(tmdbId, mediaType, seasonNum, episodeNum, mediaInfo);
+    }).catch(function(error) {
+        console.error(`[Cinevibe] Scraping error: ${error.message}`);
+        return [];
+    });
+}
+
+// Export the main function
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { getStreams };
 } else {
-    global.getStreams = getStreams;
+    // For React Native environment
+    global.CinevibeScraperModule = { getStreams };
 }
