@@ -285,7 +285,7 @@
       "filename": "providers/videasy.js",
       "enabled": true,
       "formats": ["mp4", "m3u8"],
-      "logo": "",
+      "logo": "https://i.postimg.cc/7LHYMtVV/videasy.png",
       "contentLanguage": ["en"]
     },
     {
