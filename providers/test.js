@@ -2,7 +2,7 @@
 // SuperFlixAPI Provider - Dublado via API, Legendado via vidsrc-embed (com suporte a séries e filmes)
 
 const BASE_URL = "https://superflixapi.rest";
-const CDN_BASE = "https://tmstr3.neonhorizonworkshops.com";
+const CDN_BASE = "https://tmstr1.neonhorizonworkshops.com";
 const TMDB_API_KEY = "b64d2f3a4212a99d64a7d4485faed7b3";
 
 let SESSION_DATA = {
