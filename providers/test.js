@@ -57,7 +57,7 @@ function fixVideoUrl(url) {
     let fixedUrl = url;
     
     // Substituir padrão tmstr3.{v1} por tmstr3.neonhorizonworkshops.com
-    fixedUrl = fixedUrl.replace(/tmstr3\.\{v\d+\}/g, 'tmstr3.neonhorizonworkshops.com');
+    fixedUrl = fixedUrl.replace(/tmstr2\.\{v\d+\}/g, 'tmstr2.neonhorizonworkshops.com');
     
     // Substituir outros placeholders restantes
     fixedUrl = fixedUrl.replace(/\{v\d+\}/g, 'neonhorizonworkshops.com');
