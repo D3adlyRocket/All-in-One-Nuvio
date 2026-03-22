@@ -1,14 +1,14 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║                        HindMovie — Nuvio Stream Plugin                      ║
+ * ║                       HindMoviez — Nuvio Stream Plugin                       ║
  * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Source     › https://hindmovie.ltd                                         ║
- * ║  Author     › Sanchit  |  TG: @S4NCHITT                                     ║
+ * ║  Source     › https://hindmovie.ltd                                          ║
+ * ║  Author     › Sanchit  |  TG: @S4NCHITT                                      ║
  * ║  Project    › Murph's Streams                                                ║
- * ║  Manifest   › https://badboysxs-morpheus.hf.space/manifest.json             ║
+ * ║  Manifest   › https://badboysxs-morpheus.hf.space/manifest.json              ║
  * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Supports   › Movies & Series  (480p / 720p / 1080p / 4K)                   ║
- * ║  Chain      › mvlink.site → hshare.ink → hcloud → Servers                   ║
+ * ║  Supports   › Movies & Series  (480p / 720p / 1080p / 4K)                    ║
+ * ║  Chain      › mvlink.site → hshare.ink → hcloud → Servers                    ║
  * ║  Parallel   › All quality & episode links resolved concurrently              ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
@@ -23,7 +23,7 @@ const cheerio = require('cheerio-without-node-native');
 
 const BASE_URL     = 'https://hindmovie.ltd';
 const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
-const PLUGIN_TAG   = '[HindMovie]';
+const PLUGIN_TAG   = '[HindMoviez]';
 
 const DEFAULT_HEADERS = {
   'User-Agent'      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -111,7 +111,7 @@ function getTmdbDetails(tmdbId, type) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Extract article cards (title + URL) from a HindMovie search results page.
+ * Extract article cards (title + URL) from a HindMoviez search results page.
  */
 function parseArticles(html) {
   var $ = cheerio.load(html);
@@ -298,7 +298,7 @@ function resolveServerChain(mvlinkUrl) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Search HindMovie for the given title and return the URL of the best-matching page.
+ * Search HindMoviez for the given title and return the URL of the best-matching page.
  */
 function findPageUrl(title) {
   var searchUrl = BASE_URL + '/?s=' + encodeURIComponent(title);
@@ -420,12 +420,12 @@ function getStreams(tmdbId, type, season, episode) {
                 if (!url) return;
 
                 streams.push({
-                  name  : '🎬 HindMovie | ' + serverName + (height ? ' · ' + height + 'p' : ''),
+                  name  : '🎬 HindMoviez | ' + serverName + (height ? ' · ' + height + 'p' : ''),
                   title : res.ep.title + '\n' + res.quality + '\nby Sanchit · @S4NCHITT · Murph\'s Streams',
                   url   : url,
                   quality: height ? height + 'p' : res.quality,
                   behaviorHints: {
-                    bingeGroup : 'hindmovie-' + serverName.replace(/\s+/g, '-').toLowerCase(),
+                    bingeGroup : 'hindmoviez-' + serverName.replace(/\s+/g, '-').toLowerCase(),
                   },
                 });
               });
