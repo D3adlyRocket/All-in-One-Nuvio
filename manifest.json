@@ -67,6 +67,19 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "hindmoviez",
+      "name": "HindMoviez",
+      "description": "HindMoviez - Hindi & English Movies and Series (480p / 720p / 1080p / 4K)",
+      "version": "1.0.0",
+      "author": "Sanchit (@S4NCHITT) — Murph's Streams",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/hindmoviez.js",
+      "enabled": true,
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/Icons/hindmoviez.png",
+      "contentLanguage": ["en", "hi"]
+    },
+    {
       "id": "animekai",
       "name": "AnimeKai",
       "description": "AnimeKai TV episodes via AnimeKai servers",
