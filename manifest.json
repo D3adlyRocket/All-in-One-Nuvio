@@ -66,6 +66,19 @@
       "logo": "https://i.postimg.cc/DZpW6Xfb/4khdhub.png",
       "contentLanguage": ["en"]
     },
+    { 
+      "id": "4khdhubtv",
+      "name": "4khdhub-tv",
+      "description": "4KHDHub direct links",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/4khdhub_tv.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/DZpW6Xfb/4khdhub.png",
+      "contentLanguage": ["en"]
+    },
     {
       "id": "hindmoviez",
       "name": "HindMoviez",
