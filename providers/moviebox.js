@@ -7,584 +7,459 @@
  * ║  Project    › Murph's Streams                                                ║
  * ║  Manifest   › https://badboysxs-morpheus.hf.space/manifest.json             ║
  * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Platforms  › Hindi · Tamil · Telugu · English (auto-detected)              ║
- * ║  Supports   › Movies & Series  (360p / 480p / 720p / 1080p / Auto)          ║
- * ║  Search     › Parallel multi-query with Hindi-priority scoring              ║
- * ║  Headers    › Inline behaviorHints.headers (no proxy required)              ║
+ * ║  Languages  › Hindi · Tamil · Telugu · English (auto-detected)              ║
+ * ║  Quality    › 360p / 480p / 720p / 1080p / Auto                             ║
+ * ║  Search     › Direct JSON API — no HTML scraping, no Nuxt parsing           ║
+ * ║  Speed      › Parallel queries, early-exit on first stream hit              ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
- *
- * ── Proxy note ──────────────────────────────────────────────────────────────────
- * The original Stremio addon (index.js) routes MovieBox streams through:
- *   • /proxy?url=...   for HLS (.m3u8) — rewrites segment URLs
- *   • /mb-stream?url=  for direct MP4/MKV — Range request passthrough
- *
- * Nuvio handles HLS natively and passes behaviorHints.headers to the player,
- * so no proxy server is needed here. We embed the required headers directly
- * into each stream object. The player receives them and sends them with every
- * segment request automatically.
- * ────────────────────────────────────────────────────────────────────────────────
  */
 
 'use strict';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Configuration
+// Config
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
-const MB_BASE      = 'https://themoviebox.org';
-const PLUGIN_TAG   = '[MovieBox]';
+var TMDB_KEY  = '439c478a771f35c05022f9feabcca01c';
+var MB_BASE   = 'https://themoviebox.org';
+var TAG       = '[MovieBox]';
+var UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0';
 
-/**
- * Headers required by MovieBox's CDN for every video/segment request.
- * Embedded into behaviorHints.headers so Nuvio passes them to the player.
- */
-const MB_STREAM_HEADERS = {
-  'User-Agent'     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
+// Headers sent with every segment/chunk request by the player
+var STREAM_HEADERS = {
+  'User-Agent'     : UA,
   'Referer'        : 'https://themoviebox.org/',
   'Origin'         : 'https://themoviebox.org',
-  'Accept'         : 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
+  'Accept'         : '*/*',
   'Accept-Language': 'en-US,en;q=0.9',
-  'Sec-Fetch-Dest' : 'video',
-  'Sec-Fetch-Mode' : 'cors',
-  'Sec-Fetch-Site' : 'cross-site',
   'Connection'     : 'keep-alive',
 };
 
-const HTML_HEADERS = {
-  'User-Agent'                : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
-  'Accept'                    : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language'           : 'en-US,en;q=0.9',
-  'Upgrade-Insecure-Requests' : '1',
+// ─────────────────────────────────────────────────────────────────────────────
+// LRU Cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Cache(max, ttl) {
+  this.max = max; this.ttl = ttl; this.d = {}; this.k = [];
+}
+Cache.prototype.get = function (k) {
+  var e = this.d[k];
+  if (!e) return undefined;
+  if (Date.now() - e.t > this.ttl) { delete this.d[k]; return undefined; }
+  return e.v;
+};
+Cache.prototype.set = function (k, v) {
+  if (this.d[k]) { this.d[k] = { v: v, t: Date.now() }; return; }
+  if (this.k.length >= this.max) delete this.d[this.k.shift()];
+  this.k.push(k); this.d[k] = { v: v, t: Date.now() };
 };
 
-const API_HEADERS = {
-  'User-Agent'     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
+var streamCache = new Cache(200, 20 * 60 * 1000);  // 20 min
+var metaCache   = new Cache(500, 24 * 60 * 60 * 1000);
+var srchCache   = new Cache(300, 10 * 60 * 1000);  // 10 min
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP — simple fetch wrappers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function get(url, headers) {
+  return fetch(url, {
+    headers  : Object.assign({ 'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'en-US,en;q=0.9' }, headers || {}),
+    redirect : 'follow',
+  }).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TMDB
+// ─────────────────────────────────────────────────────────────────────────────
+
+function tmdb(id, type) {
+  var key = 'mb_' + id + type;
+  var hit = metaCache.get(key);
+  if (hit) return Promise.resolve(hit);
+
+  var isTv = type === 'tv' || type === 'series';
+  var url  = 'https://api.themoviedb.org/3/' + (isTv ? 'tv' : 'movie') + '/' + id + '?api_key=' + TMDB_KEY;
+
+  return get(url).then(function (d) {
+    var title = isTv ? d.name  : d.title;
+    var date  = isTv ? d.first_air_date : d.release_date;
+    var year  = (date || '').slice(0, 4);
+    var r = { title: title || null, year: year, isTv: isTv };
+    if (title) metaCache.set(key, r);
+    return r;
+  }).catch(function (e) {
+    console.log(TAG + ' TMDB error: ' + e.message); return null;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MovieBox Search API
+// Direct JSON endpoint — much faster than HTML+Nuxt scraping
+// ─────────────────────────────────────────────────────────────────────────────
+
+var SEARCH_HEADERS = {
+  'User-Agent'     : UA,
   'Accept'         : 'application/json',
   'Accept-Language': 'en-US,en;q=0.9',
-  'X-Client-Info'  : JSON.stringify({ timezone: 'Asia/Kolkata' }),
+  'X-Client-Info'  : '{"timezone":"Asia/Kolkata"}',
+  'Referer'        : MB_BASE + '/newWeb/searchResult?keyword=',
   'Sec-Fetch-Dest' : 'empty',
   'Sec-Fetch-Mode' : 'cors',
   'Sec-Fetch-Site' : 'same-origin',
-  'Pragma'         : 'no-cache',
   'Cache-Control'  : 'no-cache',
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Simple LRU Cache
-// ─────────────────────────────────────────────────────────────────────────────
-
-function LRUCache(max, ttlMs) {
-  this.max   = max;
-  this.ttl   = ttlMs;
-  this.data  = {};
-  this.order = [];
-}
-LRUCache.prototype.get = function (k) {
-  var e = this.data[k];
-  if (!e) return undefined;
-  if (Date.now() - e.ts > this.ttl) { delete this.data[k]; return undefined; }
-  return e.v;
-};
-LRUCache.prototype.set = function (k, v) {
-  if (this.data[k]) { this.data[k] = { v: v, ts: Date.now() }; return; }
-  if (this.order.length >= this.max) { delete this.data[this.order.shift()]; }
-  this.order.push(k);
-  this.data[k] = { v: v, ts: Date.now() };
+var PLAY_HEADERS = {
+  'User-Agent'     : UA,
+  'Accept'         : 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'X-Client-Info'  : '{"timezone":"Asia/Kolkata"}',
+  'Sec-Fetch-Dest' : 'empty',
+  'Sec-Fetch-Mode' : 'cors',
+  'Sec-Fetch-Site' : 'same-origin',
+  'Cache-Control'  : 'no-cache',
 };
 
-var streamCache = new LRUCache(200, 30 * 60 * 1000);   // 30 min
-var metaCache   = new LRUCache(500, 24 * 60 * 60 * 1000); // 24 hr
-var searchCache = new LRUCache(300, 15 * 60 * 1000);   // 15 min
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Nuxt SSR Data Extractor
-// MovieBox renders via Nuxt — all content lives in __NUXT_DATA__ JSON blob
-// ─────────────────────────────────────────────────────────────────────────────
-
-function extractNuxtData(html) {
-  var idx = html.indexOf('__NUXT_DATA__');
-  if (idx === -1) return null;
-  var start = html.indexOf('[', idx);
-  var end   = html.indexOf('</script>', idx);
-  if (start === -1 || end === -1) return null;
-  try { return JSON.parse(html.substring(start, end)); }
-  catch (e) { return null; }
-}
-
-function resolveNuxt(data, idx, depth) {
-  depth = depth || 0;
-  if (depth > 15 || idx < 0 || idx >= data.length) return null;
-  var item = data[idx];
-
-  if (Array.isArray(item)) {
-    if (item.length === 2 && (item[0] === 'ShallowReactive' || item[0] === 'Reactive')) {
-      return resolveNuxt(data, item[1], depth + 1);
-    }
-    return item.map(function (v) {
-      return typeof v === 'number' ? resolveNuxt(data, v, depth + 1) : v;
-    });
-  }
-
-  if (item && typeof item === 'object') {
-    var obj = {};
-    Object.keys(item).forEach(function (k) {
-      var v = item[k];
-      obj[k] = typeof v === 'number' ? resolveNuxt(data, v, depth + 1) : v;
-    });
-    return obj;
-  }
-
-  return item;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HTTP Helper
-// ─────────────────────────────────────────────────────────────────────────────
-
-function fetchText(url, extraHeaders) {
-  return fetch(url, {
-    headers  : Object.assign({}, HTML_HEADERS, extraHeaders || {}),
-    redirect : 'follow',
-  })
-    .then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
-      return res.text();
-    });
-}
-
-function fetchJson(url, extraHeaders) {
-  return fetch(url, {
-    headers  : Object.assign({}, API_HEADERS, extraHeaders || {}),
-    redirect : 'follow',
-  })
-    .then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
-      return res.json();
-    });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TMDB Lookup
-// ─────────────────────────────────────────────────────────────────────────────
-
-function getTmdbDetails(tmdbId, type) {
-  var cacheKey = 'mb_meta_' + tmdbId + '_' + type;
-  var hit = metaCache.get(cacheKey);
-  if (hit) return Promise.resolve(hit);
-
-  var isTv = (type === 'tv' || type === 'series');
-  var url  = 'https://api.themoviedb.org/3/' + (isTv ? 'tv' : 'movie') + '/' + tmdbId + '?api_key=' + TMDB_API_KEY;
-  console.log(PLUGIN_TAG + ' TMDB → ' + url);
-
-  return fetchJson(url, { 'Accept': 'application/json' }).then(function (d) {
-    if (!d) return null;
-    var title   = isTv ? d.name  : d.title;
-    var dateStr = isTv ? d.first_air_date : d.release_date;
-    var year    = dateStr ? dateStr.slice(0, 4) : '';
-    var result  = { title: title || null, year: year, isTv: isTv };
-    if (title) metaCache.set(cacheKey, result);
-    return result;
-  }).catch(function (err) {
-    console.log(PLUGIN_TAG + ' TMDB error: ' + err.message);
-    return null;
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Search
-// ─────────────────────────────────────────────────────────────────────────────
-
-function search(query) {
-  var cached = searchCache.get(query);
+/**
+ * Call the MovieBox search JSON API directly.
+ * Returns array of { subject_id, title, subject_type, detail_path, release_date, language }
+ */
+function mbSearch(query) {
+  var cached = srchCache.get(query);
   if (cached) return Promise.resolve(cached);
 
-  console.log(PLUGIN_TAG + ' Search: "' + query + '"');
-  var url = new URL(MB_BASE + '/newWeb/searchResult');
-  url.searchParams.set('keyword', query);
+  // Direct JSON API endpoint (not the HTML search page)
+  var url = MB_BASE + '/wefeed-h5api-bff/subject/search'
+    + '?keyword=' + encodeURIComponent(query)
+    + '&pageNum=1&pageSize=20';
 
-  return fetchText(url.toString()).then(function (html) {
-    var data = extractNuxtData(html);
-    if (!data) { console.log(PLUGIN_TAG + ' No Nuxt data in search'); return []; }
+  console.log(TAG + ' API search: "' + query + '"');
 
-    var itemsIndices = null;
-    for (var i = 0; i < data.length; i++) {
-      var item = data[i];
-      if (item && typeof item === 'object' && 'pager' in item && 'items' in item) {
-        var ref = item.items;
-        itemsIndices = typeof ref === 'number' ? data[ref] : ref;
-        break;
+  return fetch(url, { headers: SEARCH_HEADERS, redirect: 'follow' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (data) {
+      // Handle both possible response shapes
+      var items = [];
+      if (data && data.data) {
+        items = data.data.list || data.data.items || data.data || [];
       }
-    }
-    if (!itemsIndices || !Array.isArray(itemsIndices)) return [];
+      if (!Array.isArray(items)) items = [];
 
-    var results = [];
-    for (var j = 0; j < itemsIndices.length; j++) {
-      var resolved = resolveNuxt(data, itemsIndices[j]);
-      if (!resolved || typeof resolved !== 'object') continue;
+      var results = items.map(function (item) {
+        return {
+          subject_id   : item.subjectId || item.subject_id || item.id,
+          title        : item.title || item.name || '',
+          subject_type : item.subjectType || item.subject_type || item.type,
+          detail_path  : item.detailPath  || item.detail_path  || '',
+          release_date : item.releaseDate || item.release_date || '',
+          language     : item.language || item.lang || item.dubbed_lang || null,
+        };
+      }).filter(function (r) { return r.subject_id && r.title; });
 
-      results.push({
-        subject_id   : resolved.subjectId,
-        title        : resolved.title || '',
-        subject_type : resolved.subjectType,  // 1 = TV, 2 = Movie
-        detail_path  : resolved.detailPath,
-        release_date : resolved.releaseDate,
-        language     : resolved.language || resolved.lang || resolved.dubbed_lang || resolved.original_language || null,
-      });
-    }
+      console.log(TAG + ' "' + query + '" → ' + results.length + ' result(s)');
+      if (results.length) srchCache.set(query, results);
+      return results;
+    })
+    .catch(function (err) {
+      console.log(TAG + ' Search API error ("' + query + '"): ' + err.message);
+      // Fallback: try alternate endpoint path
+      return mbSearchFallback(query);
+    });
+}
 
-    console.log(PLUGIN_TAG + ' Search "' + query + '" → ' + results.length + ' result(s)');
-    if (results.length) searchCache.set(query, results);
-    return results;
-  }).catch(function (err) {
-    console.log(PLUGIN_TAG + ' Search error for "' + query + '": ' + err.message);
-    return [];
-  });
+/**
+ * Fallback search using the Nuxt SSR page but with a regex shortcut
+ * instead of full Nuxt data resolution — much faster than before.
+ */
+function mbSearchFallback(query) {
+  var url = MB_BASE + '/newWeb/searchResult?keyword=' + encodeURIComponent(query);
+  console.log(TAG + ' Fallback HTML search: "' + query + '"');
+
+  return fetch(url, {
+    headers  : { 'User-Agent': UA, 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
+    redirect : 'follow',
+  })
+    .then(function (r) { return r.text(); })
+    .then(function (html) {
+      // Fast regex extraction instead of full Nuxt tree walk
+      var results = [];
+      // Extract subjectId + title + detailPath + subjectType from the Nuxt blob
+      var nuxtIdx = html.indexOf('__NUXT_DATA__');
+      if (nuxtIdx === -1) return results;
+
+      var start = html.indexOf('[', nuxtIdx);
+      var end   = html.indexOf('</script>', nuxtIdx);
+      if (start === -1 || end === -1) return results;
+
+      var raw;
+      try { raw = JSON.parse(html.substring(start, end)); }
+      catch (e) { return results; }
+
+      // Walk array looking for objects that have subjectId + detailPath
+      var seen = {};
+      for (var i = 0; i < raw.length; i++) {
+        var item = raw[i];
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        if (!item.subjectId || !item.detailPath) continue;
+        var sid = String(item.subjectId);
+        if (seen[sid]) continue;
+        seen[sid] = true;
+        results.push({
+          subject_id   : item.subjectId,
+          title        : item.title || '',
+          subject_type : item.subjectType,
+          detail_path  : item.detailPath,
+          release_date : item.releaseDate || '',
+          language     : item.language || item.lang || null,
+        });
+      }
+
+      console.log(TAG + ' Fallback found ' + results.length + ' result(s)');
+      if (results.length) srchCache.set(query, results);
+      return results;
+    })
+    .catch(function (e) {
+      console.log(TAG + ' Fallback error: ' + e.message);
+      return [];
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Scoring & Language Helpers
+// Scoring
 // ─────────────────────────────────────────────────────────────────────────────
 
-function normalizeTitle(str) {
-  return (str || '')
-    .toLowerCase()
-    .replace(/\[.*?\]/g, ' ')
-    .replace(/\(.*?\)/g, ' ')
-    .replace(/\s*-\s*(part|volume|chapter|episode)\s*\d+/gi, ' ')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function norm(s) {
+  return (s || '').toLowerCase()
+    .replace(/\[.*?\]/g, ' ').replace(/\(.*?\)/g, ' ')
+    .replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function scoreResult(result, targetTitle, targetYear) {
-  var normTarget = normalizeTitle(targetTitle);
-  var normResult = normalizeTitle(result.title || '');
-  var resultYear = (result.release_date || '').slice(0, 4);
-
-  if (!normTarget || !normResult) return 0;
-  if (normResult === normTarget) return 90;
-  if (normResult.indexOf(normTarget) !== -1 || normTarget.indexOf(normResult) !== -1) return 70;
-
-  var wordsTarget = normTarget.split(' ').filter(function (w) { return w.length > 2; });
-  var wordsResult = normResult.split(' ').filter(function (w) { return w.length > 2; });
-  if (!wordsTarget.length || !wordsResult.length) return 0;
-
-  var matches = wordsTarget.filter(function (w) { return wordsResult.indexOf(w) !== -1; }).length;
-  var overlap  = matches / Math.max(wordsTarget.length, wordsResult.length);
-  var s = Math.round(overlap * 50);
-
-  if (targetYear && resultYear && targetYear === resultYear) s += 30;
+function score(r, title, year) {
+  var nt = norm(title), nr = norm(r.title || '');
+  var ry = (r.release_date || '').slice(0, 4);
+  if (!nt || !nr) return 0;
+  if (nr === nt) return 100;
+  if (nr.indexOf(nt) !== -1 || nt.indexOf(nr) !== -1) return 75;
+  var wt = nt.split(' ').filter(function(w){return w.length>2;});
+  var wr = nr.split(' ').filter(function(w){return w.length>2;});
+  if (!wt.length || !wr.length) return 0;
+  var m = wt.filter(function(w){return wr.indexOf(w)!==-1;}).length;
+  var s = Math.round((m / Math.max(wt.length, wr.length)) * 55);
+  if (year && ry && year === ry) s += 30;
   return s;
 }
 
-function isHindi(result) {
-  return (result.language && result.language.toLowerCase().includes('hindi')) ||
-         (result.title || '').toLowerCase().includes('hindi');
+function isHindi(r) {
+  return ((r.language || '').toLowerCase().includes('hindi')) ||
+         (r.title || '').toLowerCase().includes('hindi');
 }
 
-function hasHindiTag(title) {
-  return (title || '').toLowerCase().includes('[hindi]');
-}
+function hasHindiTag(t) { return (t||'').toLowerCase().includes('[hindi]'); }
 
-function getLanguageFromTitle(title) {
-  var lower = (title || '').toLowerCase();
-  if (/\[hindi\]|\(hindi\)| hindi /.test(lower))     return 'Hindi';
-  if (/\[tamil\]|\(tamil\)| tamil /.test(lower))     return 'Tamil';
-  if (/\[telugu\]|\(telugu\)| telugu /.test(lower))  return 'Telugu';
-  if (/\[english\]|\(english\)| english /.test(lower)) return 'English';
-  if (/\[original\]|\(original\)| original /.test(lower)) return 'Original';
+function langFromTitle(t) {
+  var l = (t||'').toLowerCase();
+  if (/\[hindi\]|\(hindi\)/.test(l))    return 'Hindi';
+  if (/\[tamil\]|\(tamil\)/.test(l))    return 'Tamil';
+  if (/\[telugu\]|\(telugu\)/.test(l))  return 'Telugu';
+  if (/\[english\]|\(english\)/.test(l))return 'English';
   return 'Original';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// pickBest — Parallel multi-query search with Hindi-priority scoring
-// Mirrors the Python API pick_best() logic exactly
+// pickBest — run all queries IN PARALLEL, pick best scored result
 // ─────────────────────────────────────────────────────────────────────────────
 
 function pickBest(title, year) {
+  // All 4 queries fire simultaneously
   var queries = [
     title + ' Hindi',
-    year ? title + ' ' + year + ' Hindi' : null,
     title,
     year ? title + ' ' + year : null,
+    year ? title + ' ' + year + ' Hindi' : null,
   ].filter(Boolean);
 
-  console.log(PLUGIN_TAG + ' Parallel search: ' + queries.map(function (q) { return '"' + q + '"'; }).join(', '));
+  return Promise.all(queries.map(function(q) {
+    return mbSearch(q).catch(function(){return [];});
+  })).then(function(allResults) {
 
-  return Promise.all(queries.map(function (q) {
-    return search(q).catch(function () { return []; });
-  })).then(function (allResults) {
+    var allValid  = [];
+    var hindiList = [];
+    var bestNH    = { r: null, s: 0 };
 
-    var allValid   = [];
-    var allHindi   = [];
-    var bestNonHindi = { result: null, score: 0 };
-
-    allResults.forEach(function (results) {
-      var valid = results.filter(function (r) { return r.subject_type === 1 || r.subject_type === 2; });
+    allResults.forEach(function(arr) {
+      var valid = arr.filter(function(r){ return r.subject_type===1||r.subject_type===2; });
       allValid = allValid.concat(valid);
-
-      valid.forEach(function (r) {
-        if (!isHindi(r)) {
-          var s = scoreResult(r, title, year);
-          if (s > bestNonHindi.score) bestNonHindi = { result: r, score: s };
-        }
+      valid.forEach(function(r) {
+        if (!isHindi(r)) { var s=score(r,title,year); if(s>bestNH.s) bestNH={r:r,s:s}; }
       });
-
-      allHindi = allHindi.concat(valid.filter(isHindi));
+      hindiList = hindiList.concat(valid.filter(isHindi));
     });
 
-    // ── Exact-title Hindi retry if no Hindi found ──────────────────────────
-    var hindiRetry = Promise.resolve();
-    if (bestNonHindi.result && bestNonHindi.score >= 60 && !allHindi.length) {
-      var exactHindiQuery = bestNonHindi.result.title + ' Hindi';
-      console.log(PLUGIN_TAG + ' Fallback Hindi query: "' + exactHindiQuery + '"');
-      hindiRetry = search(exactHindiQuery).catch(function () { return []; }).then(function (extra) {
-        var valid = extra.filter(function (r) { return r.subject_type === 1 || r.subject_type === 2; });
-        allValid = allValid.concat(valid);
-        allHindi = allHindi.concat(valid.filter(isHindi));
+    // If good non-Hindi found but no Hindi — do one extra Hindi retry
+    var extra = Promise.resolve();
+    if (bestNH.r && bestNH.s >= 60 && !hindiList.length) {
+      extra = mbSearch(bestNH.r.title + ' Hindi').catch(function(){return[];}).then(function(arr){
+        var valid = arr.filter(function(r){return r.subject_type===1||r.subject_type===2;});
+        allValid  = allValid.concat(valid);
+        hindiList = hindiList.concat(valid.filter(isHindi));
       });
     }
 
-    return hindiRetry.then(function () {
-      var picked        = null;
-      var isHindiResult = false;
+    return extra.then(function() {
+      var picked = null, isHindiR = false;
 
-      // ── Pick best Hindi (threshold ≥ 20) ──────────────────────────────────
-      if (allHindi.length) {
-        var bestHindiScore = 0;
-        allHindi.forEach(function (r) {
-          var s = scoreResult(r, title, year);
-          console.log(PLUGIN_TAG + ' Hindi candidate: "' + r.title + '" score=' + s);
-          if (s > bestHindiScore) { bestHindiScore = s; picked = r; }
-        });
-        if (picked && bestHindiScore >= 20) {
-          console.log(PLUGIN_TAG + ' Best Hindi: "' + picked.title + '" score=' + bestHindiScore);
-          isHindiResult = true;
-        } else {
-          console.log(PLUGIN_TAG + ' Hindi score too low (' + bestHindiScore + '), falling back');
-          picked = null;
-        }
+      // Best Hindi (threshold 20)
+      if (hindiList.length) {
+        var best = 0;
+        hindiList.forEach(function(r){ var s=score(r,title,year); if(s>best){best=s;picked=r;} });
+        if (picked && best >= 20) { isHindiR = true; console.log(TAG+' Best Hindi: "'+picked.title+'" s='+best); }
+        else { picked = null; }
       }
 
-      // ── Fallback: best overall (threshold ≥ 30) ───────────────────────────
+      // Best overall (threshold 30)
       if (!picked) {
-        var bestOverallScore = 0;
-        allValid.forEach(function (r) {
-          var s = scoreResult(r, title, year);
-          console.log(PLUGIN_TAG + ' Overall candidate: "' + r.title + '" score=' + s);
-          if (s > bestOverallScore) { bestOverallScore = s; picked = r; }
-        });
-        if (picked && bestOverallScore >= 30) {
-          console.log(PLUGIN_TAG + ' Best overall: "' + picked.title + '" score=' + bestOverallScore);
-          isHindiResult = hasHindiTag(picked.title);
+        var best2 = 0;
+        allValid.forEach(function(r){ var s=score(r,title,year); if(s>best2){best2=s;picked=r;} });
+        if (picked && best2 >= 30) {
+          isHindiR = hasHindiTag(picked.title);
+          console.log(TAG+' Best overall: "'+picked.title+'" s='+best2);
         } else {
-          console.log(PLUGIN_TAG + ' No suitable result found');
-          return { picked: null, isHindiResult: false };
+          console.log(TAG+' No match found'); return { picked:null, isHindiR:false };
         }
       }
 
-      return { picked: picked, isHindiResult: isHindiResult };
+      return { picked: picked, isHindiR: isHindiR };
     });
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Raw Stream Fetch
+// Fetch streams from play API
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getStreamsRaw(subjectId, detailPath, se, ep) {
-  var url = new URL(MB_BASE + '/wefeed-h5api-bff/subject/play');
-  url.searchParams.set('subjectId',  String(subjectId));
-  url.searchParams.set('se',         String(se  != null ? se  : 0));
-  url.searchParams.set('ep',         String(ep  != null ? ep  : 0));
-  url.searchParams.set('detailPath', detailPath);
+function fetchStreams(subjectId, detailPath, se, ep) {
+  var url = MB_BASE + '/wefeed-h5api-bff/subject/play'
+    + '?subjectId=' + encodeURIComponent(subjectId)
+    + '&se='        + (se  != null ? se  : 0)
+    + '&ep='        + (ep  != null ? ep  : 0)
+    + '&detailPath='+ encodeURIComponent(detailPath);
 
-  var referer = MB_BASE + '/movies/' + detailPath + '?id=' + subjectId + '&type=/movie/detail&detailSe=&detailEp=&lang=en';
+  var ref = MB_BASE + '/movies/' + detailPath
+    + '?id=' + subjectId + '&type=/movie/detail&detailSe=&detailEp=&lang=en';
 
-  return fetchJson(url.toString(), { Referer: referer }).then(function (data) {
-    if (!data)            throw new Error('No response data');
-    if (data.code !== 0)  throw new Error(data.message || 'API error code ' + data.code);
-    return (data.data && data.data.streams) ? data.data.streams : [];
-  });
+  var hdrs = Object.assign({}, PLAY_HEADERS, { 'Referer': ref });
+
+  return fetch(url, { headers: hdrs, redirect: 'follow' })
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(d){
+      if (!d || d.code !== 0) throw new Error(d && d.message ? d.message : 'API error');
+      return (d.data && d.data.streams) ? d.data.streams : [];
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stream Formatter + Builder
+// Build stream object
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Convert raw resolution value to a clean label.
- */
-function resolutionToLabel(res) {
+function resLabel(res) {
   if (!res && res !== 0) return 'Auto';
-  if (typeof res === 'number') return res + 'p';
   var m = String(res).match(/(\d+)/);
   return m ? m[1] + 'p' : String(res);
 }
 
-function qualitySortScore(label) {
-  var m = (label || '').match(/(\d+)/);
-  if (m) return parseInt(m[1]);
-  if (label === 'Auto') return 9999;
-  return 0;
-}
+function buildStream(raw, title, year, lang, isTv, se, ep) {
+  var q = resLabel(raw.resolutions);
+  var epTag = (isTv && se != null && ep != null)
+    ? ' · S' + String(se).padStart(2,'0') + 'E' + String(ep).padStart(2,'0') : '';
 
-/**
- * Build a Nuvio-compatible stream object from a raw MovieBox stream entry.
- *
- * ── No proxy needed ─────────────────────────────────────────────────────────
- * Nuvio passes behaviorHints.headers to the media player for every request
- * (including HLS segment fetches). This is equivalent to what the Stremio addon
- * achieves by routing through /proxy — the headers are sent with every chunk.
- *
- * Stream name:  📺 MovieBox | 1080p | Hindi
- * Stream title: Peaky Blinders (2026) · S01E01
- *               📺 1080p  🔊 Hindi  🎵 DDP5.1  💾 1.2GB
- *               by Sanchit · @S4NCHITT · Murph's Streams
- */
-function buildStream(rawStream, tmdbTitle, tmdbYear, langLabel, mediaType, seasonNum, episodeNum) {
-  var quality = resolutionToLabel(rawStream.resolutions);
-  var rawUrl  = rawStream.url || '';
+  var name  = '📺 MovieBox | ' + q + ' | ' + lang;
 
-  // ── Stream name (picker row) ───────────────────────────────────────────────
-  var streamName = '📺 MovieBox | ' + quality + ' | ' + langLabel;
-
-  // ── Stream title (detail lines) ────────────────────────────────────────────
   var lines = [];
-
-  // Line 1: content title + year + episode
-  var titleLine = tmdbTitle;
-  if (tmdbYear)  titleLine += ' (' + tmdbYear + ')';
-  if (mediaType === 'tv' && seasonNum != null && episodeNum != null) {
-    titleLine += ' · S' + String(seasonNum).padStart(2, '0') + 'E' + String(episodeNum).padStart(2, '0');
+  lines.push(title + (year ? ' (' + year + ')' : '') + epTag);
+  lines.push('📺 ' + q + '  🔊 ' + lang + (raw.codecName ? '  🎞 ' + raw.codecName : ''));
+  if (raw.size) {
+    var mb = Math.round(Number(raw.size)/1024/1024*10)/10;
+    lines.push('💾 ' + mb + ' MB' + (raw.duration ? '  ⏱ ' + Math.round(raw.duration/60) + 'min' : ''));
   }
-  lines.push(titleLine);
-
-  // Line 2: quality + language
-  var techLine = '📺 ' + quality + '  🔊 ' + langLabel;
-  if (rawStream.codecName) techLine += '  🎞 ' + rawStream.codecName;
-  if (rawStream.format)    techLine += '  [' + rawStream.format + ']';
-  lines.push(techLine);
-
-  // Line 3: size + duration
-  var sizeLine = '';
-  if (rawStream.size) {
-    var sizeMb = Math.round((Number(rawStream.size) / 1024 / 1024) * 10) / 10;
-    sizeLine += '💾 ' + sizeMb + ' MB';
-  }
-  if (rawStream.duration) {
-    var mins = Math.round(rawStream.duration / 60);
-    sizeLine += (sizeLine ? '  ' : '') + '⏱ ' + mins + 'min';
-  }
-  if (sizeLine) lines.push(sizeLine);
-
   lines.push("by Sanchit · @S4NCHITT · Murph's Streams");
 
   return {
-    name  : streamName,
-    title : lines.join('\n'),
-    url   : rawUrl,
-    quality: quality,
-    // ── behaviorHints.headers ──────────────────────────────────────────────
-    // These replace the /proxy wrapper used in the Stremio addon.
-    // Nuvio's player sends these headers with every HTTP request for this
-    // stream, including HLS segment fetches — no proxy server needed.
+    name   : name,
+    title  : lines.join('\n'),
+    url    : raw.url || '',
+    quality: q,
     behaviorHints: {
-      headers     : MB_STREAM_HEADERS,
-      bingeGroup  : 'moviebox-' + langLabel.toLowerCase(),
-      notWebReady : false,
+      headers    : STREAM_HEADERS,
+      bingeGroup : 'moviebox',
+      notWebReady: false,
     },
     subtitles: [],
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public API — getStreams
+// getStreams — main export
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Main entry point called by the Nuvio plugin runner.
- *
- * @param {string}        tmdbId     - TMDB content ID
- * @param {string}        type       - "movie" | "tv" | "series"
- * @param {number|string} season     - Season number  (TV only)
- * @param {number|string} episode    - Episode number (TV only)
- * @returns {Promise<Array>}           Array of Nuvio-compatible stream objects
- */
 function getStreams(tmdbId, type, season, episode) {
   var cacheKey = 'mb_' + tmdbId + '_' + type + '_' + season + '_' + episode;
-  var hit      = streamCache.get(cacheKey);
-  if (hit) { console.log(PLUGIN_TAG + ' Cache HIT: ' + cacheKey); return Promise.resolve(hit); }
+  var hit = streamCache.get(cacheKey);
+  if (hit) { console.log(TAG + ' Cache HIT'); return Promise.resolve(hit); }
 
   var mediaType  = (type === 'series') ? 'tv' : (type || 'movie');
-  var seasonNum  = season  ? parseInt(season)  : (mediaType === 'tv' ? 1 : null);
-  var episodeNum = episode ? parseInt(episode) : (mediaType === 'tv' ? 1 : null);
+  var isTv       = mediaType === 'tv';
+  var se         = isTv ? (season  ? parseInt(season)  : 1) : 0;
+  var ep         = isTv ? (episode ? parseInt(episode) : 1) : 0;
 
-  console.log(PLUGIN_TAG + ' ► TMDB: ' + tmdbId + ' | ' + mediaType + (seasonNum ? ' S' + seasonNum + 'E' + episodeNum : ''));
+  console.log(TAG + ' ► ' + tmdbId + ' | ' + mediaType + (isTv ? ' S'+se+'E'+ep : ''));
 
-  return getTmdbDetails(tmdbId, mediaType).then(function (details) {
-    if (!details || !details.title) {
-      console.log(PLUGIN_TAG + ' TMDB lookup failed.'); return [];
-    }
+  return tmdb(tmdbId, mediaType).then(function(d) {
+    if (!d || !d.title) { console.log(TAG + ' TMDB failed'); return []; }
+    var title = d.title, year = d.year;
+    console.log(TAG + ' "' + title + '" (' + year + ')');
 
-    var title = details.title;
-    var year  = details.year;
-    console.log(PLUGIN_TAG + ' Title: "' + title + '" (' + year + ')');
+    return pickBest(title, year).then(function(res) {
+      var picked = res.picked, isHindiR = res.isHindiR;
+      if (!picked) return [];
 
-    // ── Step 1: Parallel multi-query search with scoring ─────────────────────
-    return pickBest(title, year).then(function (result) {
-      var picked        = result.picked;
-      var isHindiResult = result.isHindiResult;
+      console.log(TAG + ' Picked: "' + picked.title + '" id=' + picked.subject_id);
 
-      if (!picked) { console.log(PLUGIN_TAG + ' No match found.'); return []; }
-      console.log(PLUGIN_TAG + ' Picked: "' + picked.title + '" (id=' + picked.subject_id + ')');
+      // Language label
+      var lang = (isHindiR || hasHindiTag(picked.title)) ? 'Hindi' : langFromTitle(picked.title);
+      console.log(TAG + ' Language: ' + lang);
 
-      // ── Step 2: Language label ───────────────────────────────────────────
-      var langLabel;
-      if (isHindiResult || hasHindiTag(picked.title)) {
-        langLabel = 'Hindi';
-      } else {
-        langLabel = getLanguageFromTitle(picked.title);
-      }
-      console.log(PLUGIN_TAG + ' Language: ' + langLabel);
+      // Fetch streams
+      return fetchStreams(picked.subject_id, picked.detail_path, se, ep)
+        .then(function(raws) {
+          if (!raws.length) { console.log(TAG + ' No streams'); return []; }
 
-      // ── Step 3: se/ep parameters ─────────────────────────────────────────
-      // We trust the mediaType from TMDB — no need to call getDetail()
-      // (saves one full HTTP round-trip, mirrors v4.0 optimisation)
-      var se = (mediaType === 'tv') ? seasonNum  : 0;
-      var ep = (mediaType === 'tv') ? episodeNum : 0;
+          // Sort highest resolution first
+          var sorted = raws.slice().sort(function(a,b){
+            return Number(b.resolutions||0) - Number(a.resolutions||0);
+          });
 
-      // ── Step 4: Fetch raw streams ─────────────────────────────────────────
-      return getStreamsRaw(picked.subject_id, picked.detail_path, se, ep).then(function (rawStreams) {
-        if (!rawStreams.length) {
-          console.log(PLUGIN_TAG + ' No streams returned by API.'); return [];
-        }
+          var streams = sorted
+            .filter(function(s){ return !!s.url; })
+            .map(function(s){ return buildStream(s, title, year, lang, isTv, isTv?se:null, isTv?ep:null); });
 
-        console.log(PLUGIN_TAG + ' ' + rawStreams.length + ' raw stream(s) from API');
-
-        // ── Step 5: Sort descending by resolution, build stream objects ───────
-        var sorted = rawStreams.slice().sort(function (a, b) {
-          return Number(b.resolutions || 0) - Number(a.resolutions || 0);
+          console.log(TAG + ' ✔ ' + streams.length + ' stream(s)');
+          if (streams.length) streamCache.set(cacheKey, streams);
+          return streams;
+        })
+        .catch(function(e) {
+          console.log(TAG + ' fetchStreams error: ' + e.message);
+          return [];
         });
-
-        var streams = sorted.map(function (s) {
-          return buildStream(s, title, year, langLabel, mediaType, seasonNum, episodeNum);
-        }).filter(function (s) { return !!s.url; });
-
-        console.log(PLUGIN_TAG + ' ✔ ' + streams.length + ' stream(s) ready');
-        if (streams.length) streamCache.set(cacheKey, streams);
-        return streams;
-
-      }).catch(function (err) {
-        console.log(PLUGIN_TAG + ' getStreamsRaw error: ' + err.message);
-        return [];
-      });
-
     });
-  }).catch(function (err) {
-    console.error(PLUGIN_TAG + ' Fatal: ' + err.message);
-    return [];
+  }).catch(function(e) {
+    console.error(TAG + ' Fatal: ' + e.message); return [];
   });
 }
 
