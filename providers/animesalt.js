@@ -94,22 +94,18 @@ function searchSite(title, mediaType, year) {
       candidates.sort(function(a, b) {
         var cleanA = cleanTitle(a.title)
         var cleanB = cleanTitle(b.title)
-
         var exactA = cleanA === cleanSearch ? 0 : 1
         var exactB = cleanB === cleanSearch ? 0 : 1
         if (exactA !== exactB) return exactA - exactB
-
         var startsA = cleanA.indexOf(cleanSearch) === 0 ? 0 : 1
         var startsB = cleanB.indexOf(cleanSearch) === 0 ? 0 : 1
         if (startsA !== startsB) return startsA - startsB
-
         return cleanA.length - cleanB.length
       })
 
       if (candidates.length > 0) {
         console.log('[AnimeSalt] Best: ' + candidates[0].title + ' (' + candidates[0].year + ')')
       }
-
       return candidates
     })
 }
