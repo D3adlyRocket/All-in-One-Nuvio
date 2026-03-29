@@ -432,9 +432,22 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "onlykdrama",
+      "name": "OnlyKDrama",
+      "description": "Asian Drama",
+      "version": "1.0.0",
+      "author": "Moiz Ahmed + Codex",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/onlykdrama.js",
+      "enabled": true,
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["ko"]
+    },
+    {
       "id": "kisskh",
       "name": "Kisskh",
-      "description": "Asian Drama & Anime streaming",
+      "description": "Streams Korean dramas and movies from onlykdrama.top",
       "version": "1.0.0",
       "author": "Michat88",
       "supportedTypes": ["movie", "tv"],
