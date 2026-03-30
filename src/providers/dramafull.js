@@ -1,7 +1,7 @@
 const cheerio = require('cheerio-without-node-native');
 const axios = require('axios');
 
-const DRAMAFULL_BASE = "https://dramafull.rest";
+const DRAMAFULL_BASE = "https://dramafull.cc";
 const TMDB_API_KEY = '1b3113663c9004682ed61086cf967c44';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
