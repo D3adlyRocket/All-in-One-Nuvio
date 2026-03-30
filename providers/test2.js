@@ -84,7 +84,7 @@ function se(e) {
     }
   });
 }
-var ae = S(require("axios"));
+var ae = S(request("url"));
 var Ee = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 function ie(e) {
   try {
@@ -169,7 +169,7 @@ function le(e) {
     }
   });
 }
-var V = S(require("axios")), $ = S(require("crypto-js"));
+var V = S(request("url")), $ = S(require("crypto-js"));
 var H = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 function C(e) {
   e = e.replace(/-/g, "+").replace(/_/g, "/");
@@ -274,7 +274,7 @@ function B(e) {
     }
   });
 }
-var j = S(require("axios"));
+var j = S(request("url"));
 var b = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 function We(e, t, o) {
   let r = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", n = (s) => {
@@ -352,7 +352,7 @@ function U(e) {
     }
   });
 }
-var fe = S(require("axios"));
+var fe = S(request("url"));
 var ue = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 function pe(e) {
   return d(this, null, function* () {
