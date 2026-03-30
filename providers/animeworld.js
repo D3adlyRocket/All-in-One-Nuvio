@@ -12,7 +12,7 @@
 // publicly with a real key inside it.
 // ================================================================
 
-var TMDB_KEY = 'YOUR_TMDB_KEY_HERE'
+var TMDB_KEY = 'd80ba92bc7cefe3359668d30d06f3305'
 var BASE     = 'https://watchanimeworld.net'
 var PLAYER   = 'https://play.zephyrflick.top'
 var UA       = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
