@@ -263,6 +263,19 @@
       "contentLanguage": ["en", "hi", "ta", "te"]  
     },
     {
+      "id": "movieblast",
+      "name": "MovieBlast",
+      "description": "MovieBlast - Hindi, Telugu & English Movies and Series with multi-quality streams",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/movieblast.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en", "hi", "te"]  
+    },
+    {
       "id": "moviesdrive",
       "name": "MoviesDrive",
       "description": "MoviesDrive - Movies and TV shows with multiple streaming servers",
