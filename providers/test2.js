@@ -1,983 +1,541 @@
-// LaMovie provider for Nuvio - Compatible con Mobile Y Android TV
+// TukTuk Cinema Provider for Nuvio
+// Version: 1.7.0 - Fixed Stream Format Detection
+// Only returns playable stream URLs (M3U8, MP4)
 
-const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
-const BASE_URL = 'https://la.movie';
-const ANIME_COUNTRIES = ['JP', 'CN', 'KR'];
-const GENRE_ANIMATION = 16;
+const cheerio = require('cheerio-without-node-native');
 
-// ============================================================================
-// FETCH HELPER
-// ============================================================================
-function fetchWithTimeout(url, options, timeout) {
-  timeout = timeout || 10000;
-  var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, timeout);
-  return fetch(url, Object.assign({}, options, { signal: controller.signal }))
-    .then(function(res) { clearTimeout(timer); return res; })
-    .catch(function(err) { clearTimeout(timer); throw err; });
-}
+const MAIN_URL = 'https://tuktukhd.com/';
+const TMDB_API_KEY = '70896ffbbb915bc34056a969379c0393';
 
-function fetchText(url, headers, timeout) {
-  return fetchWithTimeout(url, {
-    headers: Object.assign({ 'User-Agent': UA }, headers || {})
-  }, timeout)
-    .then(function(res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.text();
-    });
-}
+const DEBUG_MODE = true;
 
-function fetchJson(url, headers, timeout) {
-  return fetchWithTimeout(url, {
-    headers: Object.assign({
-      'User-Agent': UA,
-      'Accept': 'application/json'
-    }, headers || {})
-  }, timeout)
-    .then(function(res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
-    });
-}
-
-// ============================================================================
-// DEBUG HELPERS
-// ============================================================================
-function createRequestId() {
-  try {
-    var rand = Math.random().toString(36).slice(2, 8);
-    var ts = Date.now().toString(36).slice(-6);
-    return rand + ts;
-  } catch (e) { return String(Date.now()); }
-}
-
-function logRid(rid, msg, extra) {
-  try {
-    if (typeof extra !== 'undefined') {
-      console.log('[LaMovie][rid:' + rid + '] ' + msg, extra);
-    } else {
-      console.log('[LaMovie][rid:' + rid + '] ' + msg);
-    }
-  } catch (e) { }
-}
-
-// ============================================================================
-// UTILITIES
-// ============================================================================
-function normalizeText(text) {
-  return text.normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
-function normalizeQuality(quality) {
-  var str = quality.toString().toLowerCase();
-  var match = str.match(/(\d+)/);
-  if (match) return match[1] + 'p';
-  if (str.includes('4k') || str.includes('uhd')) return '2160p';
-  if (str.includes('full') || str.includes('fhd')) return '1080p';
-  if (str.includes('hd')) return '720p';
-  return 'SD';
-}
-
-function buildSlug(title, year) {
-  var slug = title
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  return year ? slug + '-' + year : slug;
-}
-
-function getCategories(mediaType, genres, originCountries) {
-  if (mediaType === 'movie') return ['peliculas'];
-  var isAnimation = (genres || []).includes(GENRE_ANIMATION);
-  if (!isAnimation) return ['series'];
-  var isAnimeCountry = (originCountries || []).some(function(c) {
-    return ANIME_COUNTRIES.includes(c);
-  });
-  if (isAnimeCountry) return ['animes'];
-  return ['animes', 'series'];
-}
-
-function getServerName(url) {
-  if (url.includes('goodstream')) return 'GoodStream';
-  if (url.includes('hlswish') || url.includes('streamwish') || url.includes('strwish'))
-    return 'StreamWish';
-  if (url.includes('voe.sx')) return 'VOE';
-  if (url.includes('filemoon')) return 'Filemoon';
-  if (url.includes('vimeos.net')) return 'Vimeos';
-  if (url.includes('vimeus.com')) return 'Vimeus';
-  return 'Online';
-}
-
-// ============================================================================
-// QUALITY DETECTOR
-// ============================================================================
-function detectQuality(m3u8Url, headers) {
-  return fetchWithTimeout(m3u8Url, {
-    headers: Object.assign({ 'User-Agent': UA }, headers || {}),
-  }, 3000)
-    .then(function(res) { return res.text(); })
-    .then(function(data) {
-      if (!data.includes('#EXT-X-STREAM-INF')) {
-        var match = m3u8Url.match(/[_-](\d{3,4})p/);
-        return match ? match[1] + 'p' : '1080p';
-      }
-      var bestHeight = 0, bestWidth = 0;
-      var lines = data.split('\n');
-      for (var i = 0; i < lines.length; i++) {
-        var m = lines[i].match(/RESOLUTION=(\d+)x(\d+)/);
-        if (m) {
-          var h = parseInt(m[2]);
-          if (h > bestHeight) {
-            bestHeight = h;
-            bestWidth = parseInt(m[1]);
-          }
-        }
-      }
-      if (bestHeight === 0) return '1080p';
-      if (bestWidth >= 3840 || bestHeight >= 2160) return '4K';
-      if (bestWidth >= 1920 || bestHeight >= 1080) return '1080p';
-      if (bestWidth >= 1280 || bestHeight >= 720) return '720p';
-      if (bestWidth >= 854 || bestHeight >= 480) return '480p';
-      return '360p';
-    })
-    .catch(function() { return '1080p'; });
-}
-
-// ============================================================================
-// RESOLVER: GOODSTREAM
-// ============================================================================
-function resolveGoodStream(embedUrl) {
-  return fetchText(embedUrl, {
-    'Referer': 'https://goodstream.one',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-  }, 15000)
-    .then(function(data) {
-      var match = data.match(/file:\s*"([^"]+)"/);
-      if (!match) return null;
-      var videoUrl = match[1];
-      var refHeaders = {
-        'Referer': embedUrl,
-        'Origin': 'https://goodstream.one',
-        'User-Agent': UA
-      };
-      return detectQuality(videoUrl, refHeaders).then(function(quality) {
-        return { url: videoUrl, quality: quality, headers: refHeaders };
-      });
-    })
-    .catch(function(err) {
-      console.log('[GoodStream] Error: ' + err.message);
-      return null;
-    });
-}
-
-// ============================================================================
-// RESOLVER: VOE
-// ============================================================================
-function b64toString(str) {
-  try { return atob(str); } catch(e) { return null; }
-}
-
-function voeDecode(ct, luts) {
-  try {
-    var rawLuts = luts.replace(/^\[|\]$/g, '').split("','")
-      .map(function(s) { return s.replace(/^'+|'+$/g, ''); });
-    var escapedLuts = rawLuts.map(function(i) {
-      return i.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    });
-    var txt = '';
-    for (var ci = 0; ci < ct.length; ci++) {
-      var x = ct.charCodeAt(ci);
-      if (x > 64 && x < 91) x = (x - 52) % 26 + 65;
-      else if (x > 96 && x < 123) x = (x - 84) % 26 + 97;
-      txt += String.fromCharCode(x);
-    }
-    for (var pi = 0; pi < escapedLuts.length; pi++) {
-      txt = txt.replace(new RegExp(escapedLuts[pi], 'g'), '_');
-    }
-    txt = txt.split('_').join('');
-    var decoded1 = b64toString(txt);
-    if (!decoded1) return null;
-    var step4 = '';
-    for (var si = 0; si < decoded1.length; si++) {
-      step4 += String.fromCharCode((decoded1.charCodeAt(si) - 3 + 256) % 256);
-    }
-    var revBase64 = step4.split('').reverse().join('');
-    var finalStr = b64toString(revBase64);
-    if (!finalStr) return null;
-    return JSON.parse(finalStr);
-  } catch(e) { return null; }
-}
-
-function resolveVoe(embedUrl) {
-  return fetchText(embedUrl, { 'Referer': embedUrl }, 15000)
-    .then(function(data) {
-      var rMain = data.match(
-        /json">\s*\[s*['"]([^'"]+)['"]\s*\]\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i
-      );
-      if (rMain) {
-        var encodedArray = rMain[1];
-        var loaderUrl = rMain[2].startsWith('http')
-          ? rMain[2]
-          : new URL(rMain[2], embedUrl).href;
-        return fetchText(loaderUrl, { 'Referer': embedUrl }, 15000)
-          .then(function(jsData) {
-            var replMatch = jsData.match(
-              /(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i
-            ) || jsData.match(
-              /(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i
-            );
-            if (replMatch) {
-              var decoded = voeDecode(encodedArray, replMatch[1]);
-              if (decoded && (decoded.source || decoded.direct_access_url)) {
-                var url = decoded.source || decoded.direct_access_url;
-                return detectQuality(url, { 'Referer': embedUrl })
-                  .then(function(q) {
-                    return {
-                      url: url,
-                      quality: q,
-                      headers: { 'Referer': embedUrl }
-                    };
-                  });
-              }
-            }
-            return null;
-          });
-      }
-      var re = /(?:mp4|hls)['"\s]*:\s*['"]([^'"]+)['"]/gi;
-      var m;
-      while ((m = re.exec(data)) !== null) {
-        var candidate = m[1];
-        if (!candidate) continue;
-        var url = candidate;
-        if (url.startsWith('aHR0')) {
-          try { url = atob(url); } catch(e) {}
-        }
-        return detectQuality(url, { 'Referer': embedUrl }).then(function(q) {
-          return { url: url, quality: q, headers: { 'Referer': embedUrl } };
-        });
-      }
-      return null;
-    })
-    .catch(function(err) {
-      console.log('[VOE] Error: ' + err.message);
-      return null;
-    });
-}
-
-// ============================================================================
-// RESOLVER: FILEMOON
-// ============================================================================
-function resolveFilemoon(embedUrl) {
-  try {
-    var CryptoJS = require('crypto-js');
-
-    function b64urlToWordArray(s) {
-      var pad = (4 - s.length % 4) % 4;
-      return CryptoJS.enc.Base64.parse(s + '='.repeat(pad));
-    }
-
-    function wordArrayToBytes(wa) {
-      var words = wa.words, sigBytes = wa.sigBytes;
-      var bytes = new Uint8Array(sigBytes);
-      for (var i = 0; i < sigBytes; i++) {
-        bytes[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
-      }
-      return bytes;
-    }
-
-    function bytesToWordArray(bytes) {
-      var words = [];
-      for (var i = 0; i < bytes.length; i += 4) {
-        words.push(
-          ((bytes[i] || 0) << 24) |
-          ((bytes[i+1] || 0) << 16) |
-          ((bytes[i+2] || 0) << 8) |
-          (bytes[i+3] || 0)
-        );
-      }
-      return CryptoJS.lib.WordArray.create(words, bytes.length);
-    }
-
-    return fetchText(embedUrl, { 'Referer': 'https://filemoon.sx/' }, 15000)
-      .then(function(data) {
-        var packMatch = data.match(
-          /eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)\)\)/
-        );
-        if (!packMatch) return null;
-
-        var p = packMatch[1], a = parseInt(packMatch[2]);
-        var c = parseInt(packMatch[3]), k = packMatch[4].split('|');
-        while (c--) {
-          if (k[c]) {
-            p = p.replace(
-              new RegExp('\\b' + c.toString(a) + '\\b', 'g'),
-              k[c]
-            );
-          }
-        }
-
-        var fmMatch = p.match(
-          /,"([A-Za-z0-9+/=_-]{20,})",(\d+),"([A-Za-z0-9+/=_-]{20,})"/
-        );
-        if (!fmMatch) return null;
-
-        var encryptedB64 = fmMatch[1];
-        var iterations = parseInt(fmMatch[2]);
-        var saltB64 = fmMatch[3];
-
-        var encryptedBytes = wordArrayToBytes(b64urlToWordArray(encryptedB64));
-        var saltBytes = wordArrayToBytes(b64urlToWordArray(saltB64));
-        var saltWA = bytesToWordArray(saltBytes);
-        var key32 = wordArrayToBytes(CryptoJS.SHA256(saltWA));
-
-        var keyWA = bytesToWordArray(key32);
-        var encrypted = CryptoJS.AES.encrypt(
-          bytesToWordArray(encryptedBytes),
-          keyWA,
-          { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.NoPadding }
-        );
-        var decryptedWA = CryptoJS.AES.decrypt(
-          encrypted.toString(),
-          keyWA,
-          { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.NoPadding }
-        );
-
-        var decryptedStr = CryptoJS.enc.Utf8.stringify(decryptedWA);
-        var m3u8Match = decryptedStr.match(
-          /https?:\/\/[^\s"']+\.m3u8[^\s"']*/
-        );
-        if (!m3u8Match) return null;
-
-        var url = m3u8Match[0];
-        var headers = {
-          'Referer': 'https://filemoon.sx/',
-          'User-Agent': UA
-        };
-        return detectQuality(url, headers).then(function(q) {
-          return { url: url, quality: q, headers: headers };
-        });
-      })
-      .catch(function(err) {
-        console.log('[Filemoon] Error: ' + err.message);
-        return null;
-      });
-  } catch(e) {
-    console.log('[Filemoon] crypto-js not available: ' + e.message);
-    return Promise.resolve(null);
-  }
-}
-
-// ============================================================================
-// RESOLVER: HLSWISH
-// ============================================================================
-var HLSWISH_DOMAIN_MAP = { 'hglink.to': 'vibuxer.com' };
-
-function unpackEval(payload, radix, symtab) {
-  var chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  return payload.replace(/\b([0-9a-zA-Z]+)\b/g, function(match) {
-    var result = 0;
-    for (var i = 0; i < match.length; i++) {
-      var pos = chars.indexOf(match[i]);
-      if (pos === -1) return match;
-      result = result * radix + pos;
-    }
-    if (isNaN(result) || result >= symtab.length) return match;
-    return (symtab[result] && symtab[result] !== '') ? symtab[result] : match;
-  });
-}
-
-function resolveHlswish(embedUrl) {
-  var fetchUrl = embedUrl;
-  Object.keys(HLSWISH_DOMAIN_MAP).forEach(function(from) {
-    if (fetchUrl.includes(from)) {
-      fetchUrl = fetchUrl.replace(from, HLSWISH_DOMAIN_MAP[from]);
-    }
-  });
-  var embedHost = (fetchUrl.match(/^(https?:\/\/[^/]+)/) ||
-    ['', 'https://hlswish.com'])[1];
-
-  return fetchText(fetchUrl, {
-    'Referer': 'https://embed69.org/',
-    'Origin': 'https://embed69.org',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'es-MX,es;q=0.9',
-  }, 15000)
-    .then(function(data) {
-      var fileMatch = data.match(/file\s*:\s*["']([^"']+)["']/i);
-      if (fileMatch) {
-        var url = fileMatch[1];
-        if (url.startsWith('/')) url = embedHost + url;
-        return {
-          url: url,
-          quality: '1080p',
-          headers: { 'User-Agent': UA, 'Referer': embedHost + '/' }
-        };
-      }
-      var packMatch = data.match(
-        /eval\(function\(p,a,c,k,e,[a-z]\)\{[^}]+\}\s*\('([\s\S]+?)',\s*(\d+),\s*(\d+),\s*'([\s\S]+?)'\.split\('\|'\)/
-      );
-      if (packMatch) {
-        var unpacked = unpackEval(
-          packMatch[1],
-          parseInt(packMatch[2]),
-          packMatch[4].split('|')
-        );
-        var objMatch = unpacked.match(
-          /\{[^{}]*"hls[234]"\s*:\s*"([^"]+)"[^{}]*\}/
-        );
-        if (objMatch) {
-          var urlMatch = objMatch[0].match(
-            /"hls[234]"\s*:\s*"([^"]+\.m3u8[^"]*)"/
-          );
-          if (urlMatch) {
-            var url = urlMatch[1];
-            if (url.startsWith('/')) url = embedHost + url;
-            return {
-              url: url,
-              quality: '1080p',
-              headers: { 'User-Agent': UA, 'Referer': embedHost + '/' }
-            };
-          }
-        }
-        var m3u8Match = unpacked.match(/["']([^"']{30,}\.m3u8[^"']*)['"]/ );
-        if (m3u8Match) {
-          var url = m3u8Match[1];
-          if (url.startsWith('/')) url = embedHost + url;
-          return {
-            url: url,
-            quality: '1080p',
-            headers: { 'User-Agent': UA, 'Referer': embedHost + '/' }
-          };
-        }
-      }
-      var rawM3u8 = data.match(
-        /https?:\/\/[^"'\s\\]+\.m3u8[^"'\s\\]*/i
-      );
-      if (rawM3u8) {
-        return {
-          url: rawM3u8[0],
-          quality: '1080p',
-          headers: { 'User-Agent': UA, 'Referer': embedHost + '/' }
-        };
-      }
-      return null;
-    })
-    .catch(function(err) {
-      console.log('[HLSWish] Error: ' + err.message);
-      return null;
-    });
-}
-
-// ============================================================================
-// RESOLVER: VIMEOS
-// ============================================================================
-function resolveVimeos(embedUrl) {
-  return fetchText(embedUrl, {
-    'Referer': 'https://vimeos.net/',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-  }, 15000)
-    .then(function(data) {
-      var packMatch = data.match(
-        /eval\(function\(p,a,c,k,e,[dr]\)\{[\s\S]+?\}\('([\s\S]+?)',(\d+),(\d+),'([\s\S]+?)'\.split\('\|'\)/
-      );
-      if (!packMatch) return null;
-      var symtab = packMatch[4].split('|');
-      var unpacked = unpackEval(
-        packMatch[1],
-        parseInt(packMatch[2]),
-        symtab
-      );
-      var m3u8Match = unpacked.match(/["']([^"']+\.m3u8[^"']*)['"]/ );
-      if (!m3u8Match) return null;
-      var url = m3u8Match[1];
-      var headers = { 'User-Agent': UA, 'Referer': 'https://vimeos.net/' };
-      return detectQuality(url, headers).then(function(q) {
-        return { url: url, quality: q, headers: headers };
-      });
-    })
-    .catch(function(err) {
-      console.log('[Vimeos] Error: ' + err.message);
-      return null;
-    });
-}
-
-// ============================================================================
-// RESOLVER: VIMEUS (https://vimeus.com/)
-// ============================================================================
-function resolveVimeus(embedUrl) {
-  var VIMEUS_ORIGIN = 'https://vimeus.com';
-
-  return fetchText(embedUrl, {
-    'Referer': VIMEUS_ORIGIN + '/',
-    'Origin': VIMEUS_ORIGIN,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8'
-  }, 15000)
-    .then(function(data) {
-      var packMatch = data.match(
-        /eval\(function\(p,a,c,k,e,[dr]\)\{[\s\S]+?\}\('([\s\S]+?)',\s*(\d+),\s*(\d+),\s*'([\s\S]+?)'\.split\('\|'\)/
-      );
-      if (packMatch) {
-        var symtab = packMatch[4].split('|');
-        var radix = parseInt(packMatch[2]);
-        var unpacked = unpackEval(packMatch[1], radix, symtab);
-
-        var hlsObjMatch = unpacked.match(
-          /\{[^{}]*"hls[234]"\s*:\s*"([^"]+)"[^{}]*\}/
-        );
-        if (hlsObjMatch) {
-          var hlsUrl = hlsObjMatch[0].match(
-            /"hls[234]"\s*:\s*"([^"]+\.m3u8[^"]*)"/
-          );
-          if (hlsUrl) {
-            var url = hlsUrl[1];
-            var headers = { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' };
-            return detectQuality(url, headers).then(function(q) {
-              return { url: url, quality: q, headers: headers };
-            });
-          }
-        }
-
-        var sourcesMatch = unpacked.match(
-          /sources\s*:\s*\[\s*\{[^}]*file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i
-        );
-        if (sourcesMatch) {
-          var url = sourcesMatch[1];
-          var headers = { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' };
-          return detectQuality(url, headers).then(function(q) {
-            return { url: url, quality: q, headers: headers };
-          });
-        }
-
-        var fileMatch = unpacked.match(
-          /file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i
-        );
-        if (fileMatch) {
-          var url = fileMatch[1];
-          var headers = { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' };
-          return detectQuality(url, headers).then(function(q) {
-            return { url: url, quality: q, headers: headers };
-          });
-        }
-
-        var m3u8Match = unpacked.match(/["']([^"']{30,}\.m3u8[^"']*)['"]/ );
-        if (m3u8Match) {
-          var url = m3u8Match[1];
-          var headers = { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' };
-          return detectQuality(url, headers).then(function(q) {
-            return { url: url, quality: q, headers: headers };
-          });
-        }
-
-        var mp4Match = unpacked.match(/["']([^"']+\.mp4[^"']*)['"]/ );
-        if (mp4Match) {
-          return {
-            url: mp4Match[1],
-            quality: '720p',
-            headers: { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' }
-          };
-        }
-      }
-
-      var directFile = data.match(
-        /file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i
-      );
-      if (directFile) {
-        var url = directFile[1];
-        var headers = { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' };
-        return detectQuality(url, headers).then(function(q) {
-          return { url: url, quality: q, headers: headers };
-        });
-      }
-
-      var rawM3u8 = data.match(
-        /https?:\/\/[^"'\s\\]+\.m3u8[^"'\s\\]*/i
-      );
-      if (rawM3u8) {
-        var url = rawM3u8[0];
-        var headers = { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' };
-        return detectQuality(url, headers).then(function(q) {
-          return { url: url, quality: q, headers: headers };
-        });
-      }
-
-      var rawMp4 = data.match(
-        /https?:\/\/[^"'\s\\]+\.mp4[^"'\s\\]*/i
-      );
-      if (rawMp4) {
-        return {
-          url: rawMp4[0],
-          quality: '720p',
-          headers: { 'User-Agent': UA, 'Referer': VIMEUS_ORIGIN + '/' }
-        };
-      }
-
-      return null;
-    })
-    .catch(function(err) {
-      console.log('[Vimeus] Error: ' + err.message);
-      return null;
-    });
-}
-
-// ============================================================================
-// RESOLVER MAP
-// ============================================================================
-var RESOLVERS = {
-  'goodstream.one': resolveGoodStream,
-  'hlswish.com': resolveHlswish,
-  'streamwish.com': resolveHlswish,
-  'streamwish.to': resolveHlswish,
-  'strwish.com': resolveHlswish,
-  'voe.sx': resolveVoe,
-  'filemoon.sx': resolveFilemoon,
-  'filemoon.to': resolveFilemoon,
-  'vimeos.net': resolveVimeos,
-  'vimeus.com': resolveVimeus,
+const WORKING_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  'Accept': '*/*',
+  'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+  'Referer': 'https://tuktukhd.com/'
 };
 
-function getResolver(url) {
-  try {
-    for (var pattern in RESOLVERS) {
-      if (url.includes(pattern)) return RESOLVERS[pattern];
-    }
-  } catch(e) {}
-  return null;
-}
-
-// ============================================================================
-// TMDB
-// ============================================================================
-function getTmdbData(tmdbId, mediaType) {
-  var attempts = [
-    { lang: 'es-MX', name: 'Latino' },
-    { lang: 'en-US', name: 'InglÃ©s' },
-  ];
-
-  function tryNext(i) {
-    if (i >= attempts.length) return Promise.resolve(null);
-    var attempt = attempts[i];
-    var url = 'https://api.themoviedb.org/3/' + mediaType + '/' + tmdbId
-      + '?api_key=' + TMDB_API_KEY + '&language=' + attempt.lang;
-    return fetchJson(url, {}, 5000)
-      .then(function(data) {
-        var title = mediaType === 'movie' ? data.title : data.name;
-        var originalTitle = mediaType === 'movie'
-          ? data.original_title
-          : data.original_name;
-        if (attempt.lang === 'es-MX' &&
-          /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(title)) {
-          return tryNext(i + 1);
-        }
-        console.log('[LaMovie] TMDB (' + attempt.name + '): "' + title + '"');
-        return {
-          title: title,
-          originalTitle: originalTitle,
-          year: (data.release_date || data.first_air_date || '')
-            .substring(0, 4),
-          genres: (data.genres || []).map(function(g) { return g.id; }),
-          originCountries: data.origin_country ||
-            (data.production_countries || []).map(function(c) {
-              return c.iso_3166_1;
-            }) || [],
-        };
-      })
-      .catch(function() { return tryNext(i + 1); });
-  }
-
-  return tryNext(0);
-}
-
-// ============================================================================
-// SLUG â†’ ID
-// ============================================================================
-function extractIdFromHtml(html) {
-  var match = html.match(
-    /rel=['"]shortlink['"]\s+href=['"][^'"]*\?p=(\d+)['"]/
-  );
-  return match ? match[1] : null;
-}
-
-function getIdBySlug(category, slug) {
-  var url = BASE_URL + '/' + category + '/' + slug + '/';
-  return fetchText(url, {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'es-MX,es;q=0.9',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-  }, 8000)
-    .then(function(html) {
-      var id = extractIdFromHtml(html);
-      if (id) {
-        console.log('[LaMovie] âœ“ Slug directo: /' + category + '/'
-          + slug + ' â†’ id:' + id);
-        return { id: id };
-      }
-      return null;
-    })
-    .catch(function() { return null; });
-}
-
-function findBySlug(tmdbInfo, mediaType) {
-  var title = tmdbInfo.title;
-  var originalTitle = tmdbInfo.originalTitle;
-  var year = tmdbInfo.year;
-  var genres = tmdbInfo.genres;
-  var originCountries = tmdbInfo.originCountries;
-  var categories = getCategories(mediaType, genres, originCountries);
-
-  var slugs = [];
-  if (title) slugs.push(buildSlug(title, year));
-  if (originalTitle && originalTitle !== title) {
-    slugs.push(buildSlug(originalTitle, year));
-  }
-
-  function trySlug(si) {
-    if (si >= slugs.length) return Promise.resolve(null);
-    var slug = slugs[si];
-
-    if (categories.length === 1) {
-      return getIdBySlug(categories[0], slug).then(function(r) {
-        if (r) return r;
-        return trySlug(si + 1);
-      });
-    }
-
-    return Promise.all(
-      categories.map(function(cat) { return getIdBySlug(cat, slug); })
-    ).then(function(results) {
-      for (var ri = 0; ri < results.length; ri++) {
-        if (results[ri]) return results[ri];
-      }
-      return trySlug(si + 1);
-    });
-  }
-
-  return trySlug(0);
-}
-
-// ============================================================================
-// EPISODES
-// ============================================================================
-function getEpisodeId(seriesId, seasonNum, episodeNum) {
-  var url = BASE_URL + '/wp-api/v1/single/episodes/list?_id='
-    + seriesId + '&season=' + seasonNum + '&page=1&postsPerPage=50';
-  return fetchJson(url, {}, 12000)
-    .then(function(data) {
-      if (!data || !data.data || !data.data.posts) return null;
-      var ep = null;
-      for (var i = 0; i < data.data.posts.length; i++) {
-        var e = data.data.posts[i];
-        if (e.season_number == seasonNum &&
-          e.episode_number == episodeNum) {
-          ep = e;
-          break;
-        }
-      }
-      return ep ? ep._id : null;
-    })
-    .catch(function(err) {
-      console.log('[LaMovie] Error episodios: ' + err.message);
-      return null;
-    });
-}
-
-// ============================================================================
-// FORMAT STREAM FOR NUVIO (Android TV compatible)
-// ============================================================================
-function formatStreamForNuvio(embed, resolvedResult) {
-  var quality = normalizeQuality(embed.quality || resolvedResult.quality || '1080p');
-  var serverName = getServerName(embed.url);
-
-  // Headers completos (Android TV los necesita)
-  var streamHeaders = Object.assign({
-    'User-Agent': UA,
-    'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'identity'
-  }, resolvedResult.headers || {});
-
+function createDebugStream(name, title, info) {
   return {
-    name: 'âŒœ LaMovie âŒŸ | ' + serverName + ' - ' + quality,
-    title: quality + ' Â· ' + serverName,
-    url: resolvedResult.url,
-    quality: quality,
-    size: 'Unknown',
-    headers: streamHeaders,
-    subtitles: [],
-    provider: 'lamovie'
+    name: '🔍 ' + name,
+    title: title || 'Debug',
+    url: 'about:blank',
+    quality: info || 'Debug',
+    size: 'Info',
+    headers: WORKING_HEADERS,
+    provider: 'tuktukcinema-debug'
   };
 }
 
-// ============================================================================
-// PROCESS EMBED
-// ============================================================================
-function processEmbed(embed) {
-  var resolver = getResolver(embed.url);
-  if (!resolver) {
-    console.log('[LaMovie] Sin resolver para: ' + embed.url);
-    return Promise.resolve(null);
+function fixUrl(url) {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  if (url.startsWith('//')) return `https:${url}`;
+  if (url.startsWith('/')) return `${MAIN_URL}${url}`;
+  return `${MAIN_URL}/${url}`;
+}
+
+/**
+ * Check if URL is a playable stream format
+ */
+function isPlayableStream(url) {
+  if (!url) return false;
+  
+  const lowerUrl = url.toLowerCase();
+  
+  // M3U8 playlists are ALWAYS playable
+  if (lowerUrl.includes('.m3u8')) return true;
+  
+  // Direct video files
+  if (lowerUrl.includes('.mp4') || lowerUrl.includes('.mkv') || 
+      lowerUrl.includes('.avi') || lowerUrl.includes('.webm')) {
+    return true;
   }
-
-  return resolver(embed.url)
-    .then(function(result) {
-      if (!result || !result.url) return null;
-      return formatStreamForNuvio(embed, result);
-    })
-    .catch(function(err) {
-      console.log('[LaMovie] Error procesando embed: ' + err.message);
-      return null;
-    });
+  
+  // MPD (DASH) streams
+  if (lowerUrl.includes('.mpd')) return true;
+  
+  // Avoid known download/file hosting patterns
+  if (lowerUrl.includes('download') || lowerUrl.includes('dl.') || 
+      lowerUrl.includes('file') || lowerUrl.includes('upload')) {
+    return false;
+  }
+  
+  // If it has 'stream' in URL, it's likely playable
+  if (lowerUrl.includes('stream')) return true;
+  
+  return false;
 }
 
-// ============================================================================
-// MAIN
-// ============================================================================
-function getStreams(tmdbId, mediaType, season, episode) {
-  if (!tmdbId || !mediaType) return Promise.resolve([]);
+function extractEpisodeNumber(text) {
+  if (!text) return null;
+  
+  console.log(`[TukTuk] Extracting from: "${text}"`);
+  
+  const arabicToEnglish = {
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
+  };
+  
+  let match = text.match(/الحلقة\s*(\d+)/);
+  if (match) return parseInt(match[1]);
+  
+  match = text.match(/الحلقه\s*(\d+)/);
+  if (match) return parseInt(match[1]);
+  
+  match = text.match(/الحلقة\s*([٠-٩]+)/);
+  if (match) {
+    let num = '';
+    for (let i = 0; i < match[1].length; i++) {
+      num += arabicToEnglish[match[1][i]] || match[1][i];
+    }
+    return parseInt(num);
+  }
+  
+  match = text.match(/الحلقه\s*([٠-٩]+)/);
+  if (match) {
+    let num = '';
+    for (let i = 0; i < match[1].length; i++) {
+      num += arabicToEnglish[match[1][i]] || match[1][i];
+    }
+    return parseInt(num);
+  }
+  
+  match = text.match(/episode\s*(\d+)/i) || text.match(/ep\.?\s*(\d+)/i) || text.match(/\be(\d+)\b/i);
+  if (match) return parseInt(match[1]);
+  
+  match = text.match(/\b(\d+)\b/);
+  if (match) return parseInt(match[1]);
+  
+  return null;
+}
 
-  var rid = createRequestId();
-  var startTime = Date.now();
-  logRid(rid, 'Buscando: TMDB ' + tmdbId + ' (' + mediaType + ')'
-    + (season ? ' S' + season + 'E' + episode : ''));
+function getTitleFromTMDB(tmdbId, mediaType) {
+  return new Promise(function(resolve, reject) {
+    const endpoint = mediaType === 'movie' ? 'movie' : 'tv';
+    const tmdbUrl = `https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`;
+    
+    fetch(tmdbUrl)
+      .then(function(response) {
+        if (!response.ok) throw new Error(`TMDB ${response.status}`);
+        return response.json();
+      })
+      .then(function(data) {
+        const title = data.title || data.name || data.original_title || data.original_name;
+        const year = data.release_date ? data.release_date.substring(0, 4) : 
+                     data.first_air_date ? data.first_air_date.substring(0, 4) : '';
+        
+        if (!title) {
+          reject(new Error('No title'));
+          return;
+        }
+        
+        console.log(`[TukTukCinema] Title: "${title}"`);
+        resolve({ title: title, year: year });
+      })
+      .catch(reject);
+  });
+}
 
-  return getTmdbData(tmdbId, mediaType)
-    .then(function(tmdbInfo) {
-      if (!tmdbInfo) {
-        logRid(rid, 'No se pudo obtener info de TMDB');
-        return [];
+function similarity(s1, s2) {
+  if (!s1 || !s2) return 0;
+  const longer = s1.length > s2.length ? s1 : s2;
+  const shorter = s1.length > s2.length ? s2 : s1;
+  if (longer.length === 0) return 1.0;
+  const editDistance = levenshteinDistance(longer.toLowerCase(), shorter.toLowerCase());
+  return (longer.length - editDistance) / longer.length;
+}
+
+function levenshteinDistance(s1, s2) {
+  const costs = [];
+  for (let i = 0; i <= s1.length; i++) {
+    let lastValue = i;
+    for (let j = 0; j <= s2.length; j++) {
+      if (i === 0) {
+        costs[j] = j;
+      } else if (j > 0) {
+        let newValue = costs[j - 1];
+        if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+          newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+        }
+        costs[j - 1] = lastValue;
+        lastValue = newValue;
       }
-      return findBySlug(tmdbInfo, mediaType)
-        .then(function(found) {
-          if (!found) {
-            logRid(rid, 'No encontrado por slug');
-            return [];
-          }
-
-          var targetId = found.id;
-
-          function getEmbeds() {
-            if (mediaType === 'tv' && season && episode) {
-              return getEpisodeId(targetId, season, episode)
-                .then(function(epId) {
-                  if (!epId) {
-                    logRid(rid, 'Episodio S' + season + 'E'
-                      + episode + ' no encontrado');
-                    return null;
-                  }
-                  return epId;
-                });
-            }
-            return Promise.resolve(targetId);
-          }
-
-          return getEmbeds().then(function(id) {
-            if (!id) return [];
-            return fetchJson(
-              BASE_URL + '/wp-api/v1/player?postId=' + id + '&demo=0',
-              {},
-              6000
-            ).then(function(data) {
-              if (!data || !data.data || !data.data.embeds) {
-                logRid(rid, 'No hay embeds');
-                return [];
-              }
-
-              var embeds = data.data.embeds;
-              var RESOLVER_TIMEOUT = 5000;
-              logRid(rid, 'Embeds encontrados: ' + embeds.length);
-
-              // Usar Promise.allSettled para compatibilidad
-              // con Android TV
-              var embedPromises = embeds.map(function(embed) {
-                return processEmbed(embed)
-                  .catch(function() { return null; });
-              });
-
-              return Promise.allSettled
-                ? Promise.allSettled(embedPromises)
-                    .then(function(results) {
-                      var streams = [];
-                      for (var i = 0; i < results.length; i++) {
-                        if (results[i].status === 'fulfilled'
-                          && results[i].value) {
-                          streams.push(results[i].value);
-                        }
-                      }
-                      return streams;
-                    })
-                : new Promise(function(resolve) {
-                    var results = [];
-                    var completed = 0;
-                    var total = embeds.length;
-                    var finished = false;
-
-                    function finish() {
-                      if (finished) return;
-                      finished = true;
-                      resolve(results.filter(Boolean));
-                    }
-
-                    var timer = setTimeout(finish, RESOLVER_TIMEOUT);
-
-                    embeds.forEach(function(embed) {
-                      processEmbed(embed)
-                        .then(function(result) {
-                          if (result) results.push(result);
-                          completed++;
-                          if (completed === total) {
-                            clearTimeout(timer);
-                            finish();
-                          }
-                        })
-                        .catch(function() {
-                          completed++;
-                          if (completed === total) {
-                            clearTimeout(timer);
-                            finish();
-                          }
-                        });
-                    });
-                  });
-            })
-            .then(function(streams) {
-              // Ordenar por calidad
-              var order = {
-                '4K': 7, '2160p': 7, '1440p': 6,
-                '1080p': 5, '720p': 4, '480p': 3,
-                '360p': 2, '240p': 1, 'SD': 0,
-                'Unknown': 0
-              };
-              streams.sort(function(a, b) {
-                return (order[b.quality] || 0) - (order[a.quality] || 0);
-              });
-
-              var elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-              logRid(rid, 'âœ“ ' + streams.length + ' streams en '
-                + elapsed + 's');
-              return streams;
-            });
-          });
-        });
-    })
-    .catch(function(err) {
-      logRid(rid, 'ERROR: ' + (err.message || err));
-      return [];
-    });
+    }
+    if (i > 0) costs[s2.length] = lastValue;
+  }
+  return costs[s2.length];
 }
 
-// ============================================================================
-// EXPORT
-// ============================================================================
+function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
+  return new Promise(function(resolve, reject) {
+    const debugStreams = [];
+    
+    console.log(`[TukTukCinema] ===== REQUEST =====`);
+    console.log(`[TukTukCinema] TMDB: ${tmdbId}, Type: ${mediaType}, S${seasonNum}E${episodeNum}`);
+    
+    if (DEBUG_MODE) {
+      debugStreams.push(createDebugStream(`Request S${seasonNum}E${episodeNum}`, `TMDB: ${tmdbId}`, mediaType));
+    }
+    
+    if (!tmdbId) {
+      resolve([createDebugStream('ERROR: No TMDB ID', '', '')]);
+      return;
+    }
+    
+    getTitleFromTMDB(tmdbId, mediaType)
+      .then(function(tmdbData) {
+        const searchTitle = tmdbData.title;
+        const searchUrl = `${MAIN_URL}/?s=${encodeURIComponent(searchTitle)}`;
+        
+        if (DEBUG_MODE) {
+          debugStreams.push(createDebugStream(`Title: "${searchTitle}"`, `Year: ${tmdbData.year}`, 'TMDB'));
+        }
+        
+        return fetch(searchUrl, { headers: WORKING_HEADERS })
+          .then(function(response) { return response.text(); })
+          .then(function(html) {
+            return { html: html, searchTitle: searchTitle };
+          });
+      })
+      .then(function(searchData) {
+        const $ = cheerio.load(searchData.html);
+        const results = [];
+        
+        $('div.Block--Item').each(function() {
+          const $item = $(this);
+          const link = $item.find('a').first();
+          const href = fixUrl(link.attr('href'));
+          const title = $item.find('div.Block--Info h3').text().trim() || link.attr('title') || '';
+          
+          if (href && title) {
+            const score = similarity(title.toLowerCase(), searchData.searchTitle.toLowerCase());
+            results.push({ title: title, url: href, score: score });
+          }
+        });
+        
+        if (results.length === 0) {
+          resolve([createDebugStream('ERROR: No results', `"${searchData.searchTitle}"`, '')].concat(debugStreams));
+          return Promise.reject(new Error('No results'));
+        }
+        
+        results.sort(function(a, b) { return b.score - a.score; });
+        const bestMatch = results[0];
+        
+        if (DEBUG_MODE) {
+          debugStreams.push(createDebugStream(`Match: "${bestMatch.title}"`, `${(bestMatch.score*100).toFixed(0)}%`, ''));
+        }
+        
+        return fetch(bestMatch.url, { headers: WORKING_HEADERS })
+          .then(function(response) { return response.text(); })
+          .then(function(html) {
+            return { html: html, contentUrl: bestMatch.url, contentTitle: bestMatch.title };
+          });
+      })
+      .then(function(contentData) {
+        const $content = cheerio.load(contentData.html);
+        
+        if (mediaType === 'movie' || !seasonNum || !episodeNum) {
+          return Promise.resolve({ episodeUrl: contentData.contentUrl, contentTitle: contentData.contentTitle });
+        }
+        
+        console.log(`[TukTukCinema] TV: S${seasonNum}E${episodeNum}`);
+        
+        const seasonLinks = $content('section.allseasonss a[href*="/series/"]');
+        
+        if (DEBUG_MODE) {
+          debugStreams.push(createDebugStream(`TV: ${seasonLinks.length} seasons`, `S${seasonNum}E${episodeNum}`, 'Arabic'));
+        }
+        
+        if (seasonLinks.length > 0) {
+          if (seasonNum > seasonLinks.length) {
+            resolve([createDebugStream('ERROR: Season unavailable', `S${seasonNum}`, `Only ${seasonLinks.length}`)].concat(debugStreams));
+            return Promise.reject(new Error('Season'));
+          }
+          
+          const seasonLink = seasonLinks.eq(seasonNum - 1);
+          const seasonUrl = fixUrl(seasonLink.attr('href'));
+          
+          return fetch(seasonUrl, { headers: WORKING_HEADERS })
+            .then(function(response) { return response.text(); })
+            .then(function(seasonHtml) {
+              const $season = cheerio.load(seasonHtml);
+              const episodes = $season('section.allepcont div.row a');
+              
+              let foundEpisode = null;
+              let foundIndex = -1;
+              let foundTitle = '';
+              
+              episodes.each(function(index) {
+                const $ep = $season(this);
+                const epTitle = $ep.find('div.ep-info h2').text().trim() || 
+                               $ep.find('div.epnum').text().trim() || 
+                               $ep.text().trim();
+                
+                const epNum = extractEpisodeNumber(epTitle);
+                
+                if (epNum === episodeNum) {
+                  foundEpisode = $ep;
+                  foundIndex = index;
+                  foundTitle = epTitle;
+                  return false;
+                }
+              });
+              
+              if (!foundEpisode) {
+                resolve([createDebugStream('ERROR: Episode not found', `E${episodeNum}`, `Total: ${episodes.length}`)].concat(debugStreams));
+                return Promise.reject(new Error('Episode'));
+              }
+              
+              const episodeUrl = fixUrl(foundEpisode.attr('href'));
+              
+              if (DEBUG_MODE) {
+                debugStreams.push(createDebugStream(`Found E${episodeNum}!`, foundTitle, `Index: ${foundIndex}`));
+              }
+              
+              if (!episodeUrl) {
+                resolve([createDebugStream('ERROR: No URL', '', '')].concat(debugStreams));
+                return Promise.reject(new Error('URL'));
+              }
+              
+              return { episodeUrl: episodeUrl, contentTitle: contentData.contentTitle };
+            });
+        } else {
+          const episodes = $content('section.allepcont div.row a');
+          
+          let foundEpisode = null;
+          let foundIndex = -1;
+          
+          episodes.each(function(index) {
+            const $ep = $content(this);
+            const epTitle = $ep.find('div.ep-info h2').text().trim() || 
+                           $ep.find('div.epnum').text().trim() || 
+                           $ep.text().trim();
+            
+            const epNum = extractEpisodeNumber(epTitle);
+            
+            if (epNum === episodeNum) {
+              foundEpisode = $ep;
+              foundIndex = index;
+              return false;
+            }
+          });
+          
+          if (!foundEpisode) {
+            resolve([createDebugStream('ERROR: Episode not found', `E${episodeNum}`, '')].concat(debugStreams));
+            return Promise.reject(new Error('Episode'));
+          }
+          
+          const episodeUrl = fixUrl(foundEpisode.attr('href'));
+          
+          if (DEBUG_MODE) {
+            debugStreams.push(createDebugStream(`Found E${episodeNum}`, `Index: ${foundIndex}`, ''));
+          }
+          
+          if (!episodeUrl) {
+            resolve([createDebugStream('ERROR: No URL', '', '')].concat(debugStreams));
+            return Promise.reject(new Error('URL'));
+          }
+          
+          return Promise.resolve({ episodeUrl: episodeUrl, contentTitle: contentData.contentTitle });
+        }
+      })
+      .then(function(result) {
+        if (!result || !result.episodeUrl) {
+          resolve([createDebugStream('ERROR: No result', '', '')].concat(debugStreams));
+          return Promise.reject(new Error('Result'));
+        }
+        
+        const watchUrl = result.episodeUrl.endsWith('/') 
+          ? `${result.episodeUrl}watch/` 
+          : `${result.episodeUrl}/watch/`;
+        
+        if (DEBUG_MODE) {
+          debugStreams.push(createDebugStream('Watch page', watchUrl.substring(0, 40) + '...', ''));
+        }
+        
+        return fetch(watchUrl, { headers: WORKING_HEADERS })
+          .then(function(response) { return response.text(); })
+          .then(function(html) {
+            return { watchHtml: html, watchUrl: watchUrl, contentTitle: result.contentTitle };
+          });
+      })
+      .then(function(watchData) {
+        const $watch = cheerio.load(watchData.watchHtml);
+        const iframe = $watch('div.player--iframe iframe');
+        const iframeSrc = fixUrl(iframe.attr('src'));
+        
+        if (!iframeSrc) {
+          resolve([createDebugStream('ERROR: No iframe', '', '')].concat(debugStreams));
+          return Promise.reject(new Error('Iframe'));
+        }
+        
+        console.log(`[TukTukCinema] Iframe: ${iframeSrc}`);
+        
+        if (DEBUG_MODE) {
+          debugStreams.push(createDebugStream('Iframe found', iframeSrc.substring(0, 40) + '...', iframeSrc.includes('megatukmax') ? 'MTM' : 'Ext'));
+        }
+        
+        // For TukTuk Cinema, the streams often don't work directly
+        // Return the iframe URL for Nuvio to handle as external player
+        if (!iframeSrc.includes('megatukmax')) {
+          const streams = [{
+            name: 'TukTuk Cinema - Watch in Browser',
+            title: watchData.contentTitle,
+            url: iframeSrc,
+            quality: 'External Player',
+            size: 'Unknown',
+            headers: { 'User-Agent': WORKING_HEADERS['User-Agent'], 'Referer': watchData.watchUrl },
+            provider: 'tuktukcinema'
+          }];
+          
+          if (DEBUG_MODE) {
+            resolve([
+              createDebugStream('⚠️ PLAYBACK INFO', 'URLs may not be direct streams', 'Try external player'),
+              createDebugStream('Alternative', 'Open in browser recommended', watchData.watchUrl.substring(0, 40) + '...')
+            ].concat(debugStreams).concat(streams));
+          } else {
+            resolve(streams);
+          }
+          return Promise.reject(new Error('Done'));
+        }
+        
+        const iframeId = iframeSrc.split('/').pop();
+        const iframeUrl = `https://w.megatukmax.xyz/iframe/${iframeId}`;
+        
+        return fetch(iframeUrl, { headers: { ...WORKING_HEADERS, 'Referer': watchData.watchUrl }})
+          .then(function(response) { return response.text(); })
+          .then(function(html) {
+            return { iframeHtml: html, iframeUrl: iframeUrl, contentTitle: watchData.contentTitle, watchUrl: watchData.watchUrl };
+          });
+      })
+      .then(function(iframeData) {
+        let version = '';
+        const patterns = [
+          /"version"\s*:\s*"([a-f0-9]{32,})"/,
+          /X-Inertia-Version["']?\s*[:=]\s*["']([a-f0-9]{32,})["']/
+        ];
+        
+        for (let i = 0; i < patterns.length; i++) {
+          const match = iframeData.iframeHtml.match(patterns[i]);
+          if (match && match[1]) {
+            version = match[1];
+            break;
+          }
+        }
+        
+        if (!version) version = '852467c2571830b8584cc9bce61b6cde';
+        
+        const inertiaHeaders = {
+          'User-Agent': WORKING_HEADERS['User-Agent'],
+          'Accept': 'application/json',
+          'X-Inertia': 'true',
+          'X-Inertia-Version': version,
+          'X-Inertia-Partial-Component': 'files/mirror/video',
+          'X-Inertia-Partial-Data': 'streams',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': iframeData.iframeUrl,
+          'Origin': 'https://w.megatukmax.xyz'
+        };
+        
+        return fetch(iframeData.iframeUrl, { headers: inertiaHeaders })
+          .then(function(response) { return response.json(); })
+          .then(function(apiData) {
+            const streams = [];
+            const playableStreams = [];
+            const nonPlayableStreams = [];
+            
+            if (apiData.props && apiData.props.streams && apiData.props.streams.data) {
+              const qualities = apiData.props.streams.data;
+              
+              for (let i = 0; i < qualities.length; i++) {
+                const quality = qualities[i];
+                const label = quality.label || 'Unknown';
+                
+                if (quality.mirrors && quality.mirrors.length > 0) {
+                  for (let j = 0; j < quality.mirrors.length; j++) {
+                    const mirror = quality.mirrors[j];
+                    let link = mirror.link;
+                    
+                    if (link && link.startsWith('//')) link = `https:${link}`;
+                    
+                    if (link) {
+                      const driver = mirror.driver || 'source';
+                      const isPlayable = isPlayableStream(link);
+                      
+                      console.log(`[TukTukCinema] ${label} (${driver}): ${isPlayable ? '✓ PLAYABLE' : '✗ Not playable'} - ${link.substring(0, 50)}`);
+                      
+                      const streamObj = {
+                        name: `TukTuk - ${label} (${driver})${isPlayable ? '' : ' ⚠️'}`,
+                        title: iframeData.contentTitle,
+                        url: link,
+                        quality: label,
+                        size: isPlayable ? 'Stream' : 'Download link',
+                        headers: {
+                          'User-Agent': WORKING_HEADERS['User-Agent'],
+                          'Referer': iframeData.iframeUrl
+                        },
+                        provider: 'tuktukcinema'
+                      };
+                      
+                      if (isPlayable) {
+                        playableStreams.push(streamObj);
+                      } else {
+                        nonPlayableStreams.push(streamObj);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            
+            // Add warning stream
+            const warnings = [];
+            if (DEBUG_MODE) {
+              warnings.push(createDebugStream(
+                `Found: ${playableStreams.length} playable, ${nonPlayableStreams.length} download`,
+                playableStreams.length > 0 ? 'Try M3U8 streams first' : 'No direct streams found',
+                'Check format compatibility'
+              ));
+              
+              // Add iframe as fallback option
+              warnings.push({
+                name: '🌐 Open in External Browser',
+                title: 'Fallback: Browser playback',
+                url: iframeData.watchUrl,
+                quality: 'Browser',
+                size: 'External',
+                headers: { 'User-Agent': WORKING_HEADERS['User-Agent'] },
+                provider: 'tuktukcinema-external'
+              });
+            }
+            
+            // Prioritize playable streams
+            const finalStreams = playableStreams.length > 0 ? playableStreams : nonPlayableStreams;
+            
+            if (finalStreams.length === 0) {
+              resolve([createDebugStream('ERROR: No streams', 'API returned empty', '')].concat(debugStreams).concat(warnings));
+            } else {
+              console.log(`[TukTukCinema] Returning ${finalStreams.length} stream(s)`);
+              resolve((DEBUG_MODE ? debugStreams.concat(warnings) : []).concat(finalStreams));
+            }
+          });
+      })
+      .catch(function(error) {
+        if (error.message === 'Done' || error.message === 'No results' || 
+            error.message === 'Season' || error.message === 'Episode' ||
+            error.message === 'URL' || error.message === 'Result' || error.message === 'Iframe') {
+          return;
+        }
+        console.error(`[TukTukCinema] Error: ${error.message}`);
+        resolve([createDebugStream('ERROR', error.message, '')].concat(debugStreams));
+      });
+  });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { getStreams: getStreams };
+  module.exports = { getStreams };
 } else {
-  global.LaMovieModule = { getStreams: getStreams };
+  global.getStreams = getStreams;
 }
