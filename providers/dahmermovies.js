@@ -1,4 +1,4 @@
-// Dahmer Movies Scraper for Nuvio Local Scrapers
+we// Dahmer Movies Scraper for Nuvio Local Scrapers
 // React Native compatible version
 
 console.log('[DahmerMovies] Initializing Dahmer Movies scraper');
@@ -118,11 +118,11 @@ function decode(input) {
 
 // Function to resolve redirects and get the final direct URL
 function resolveFinalUrl(startUrl) {
-    const maxRedirects = 5;
+    const maxRedirects = 10;
     const referer = 'https://a.111477.xyz/';
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
 
-    function attemptResolve(url, count, retryCount = 0) {
+    function attemptResolve(url, count, retryCount = 3) {
         if (count >= maxRedirects) {
             return Promise.resolve(url.includes('111477.xyz') ? null : url);
         }
