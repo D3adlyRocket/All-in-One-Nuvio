@@ -137,7 +137,7 @@ function resolveFinalUrl(startUrl) {
         }).then(function (response) {
             // Handle rate limiting
             if (response.status === 429 && retryCount < 3) {
-                const waitTime = (retryCount + 1) * 5000;
+                const waitTime = (retryCount + 1) * 2000;
                 return new Promise(resolve => setTimeout(resolve, waitTime))
                     .then(() => attemptResolve(url, count, retryCount + 1));
             }
