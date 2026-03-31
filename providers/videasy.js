@@ -503,7 +503,7 @@ function formatStreamsForNuvio(mediaData, serverName, serverConfig, mediaDetails
       let streamType = 'unknown';
       let headers = Object.assign({}, HEADERS, {
         'Referer': 'https://api.videasy.net/',
-        'Origin': 'https://videasy.net/player'
+        'Origin': 'https://player.videasy.net/'
       });
 
       if (source.url.includes('.m3u8')) {
