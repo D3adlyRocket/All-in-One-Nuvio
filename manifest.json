@@ -147,6 +147,19 @@
       "contentLanguage": ["en", "hi", "ar"]
     },
     {
+      "id": "cinemastream",
+      "name": "CinemaStream",
+      "description": "Multi Language Provider",
+      "version": "1.0.0",
+      "author": "Kabir",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/cinemastream.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en", "hi"]
+    },
+    {
       "id": "dahmermovies",
       "name": "Dahmermovies",
       "description": "Auto-generated description for Dahmermovies",
