@@ -45,7 +45,7 @@
       "id": "allwish",
       "name": "🌟 All-Wish",
       "description": "All-Wish TV episodes via All-Wish servers",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": "Kabir",
       "supportedTypes": ["movie", "tv"],
       "filename": "providers/allwish.js",
