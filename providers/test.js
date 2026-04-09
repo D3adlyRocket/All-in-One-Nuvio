@@ -7,9 +7,61 @@
 //   3. Les URLs proxy nécessitent un compte premium nakios
 // =============================================================
 
-var NAKIOS_API      = 'https://api.nakios.art/api';
-var NAKIOS_REFERER  = 'https://nakios.art/';
+var NAKIOS_API_DEFAULT = 'https://api.nakios.art/api';
+var NAKIOS_API      = NAKIOS_API_DEFAULT;
+var NAKIOS_REFERER_DEFAULT = 'https://nakios.art/';
+var NAKIOS_REFERER  = NAKIOS_REFERER_DEFAULT;
 var NAKIOS_UA       = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+var NAKIOS_REDIRECT = 'https://nakios.online/';
+var NAKIOS_TELEGRAM = 'https://t.me/s/nakiosfr';
+
+// ---------------------------------------------------------------
+// Détection du domaine actif
+// 1er choix : nakios.online (page de redirection)
+// 2ème choix : Telegram @nakiosfr
+// ---------------------------------------------------------------
+function detectNakiosDomain() {
+  return fetch(NAKIOS_REDIRECT, {
+    method: 'GET',
+    headers: { 'User-Agent': NAKIOS_UA }
+  })
+    .then(function(res) { return res.text(); })
+    .then(function(html) {
+      var m = html.match(/https?:\/\/nakios\.[a-z]+/gi);
+      if (!m) throw new Error('Aucun domaine sur nakios.online');
+      var domains = m.filter(function(u) {
+        return u.indexOf('nakios.online') === -1 && u.indexOf('t.me') === -1;
+      });
+      if (!domains.length) throw new Error('Aucun domaine valide');
+      var base = domains[domains.length - 1].replace(/\/$/, '');
+      console.log('[Nakios] Domaine via nakios.online:', base);
+      return base;
+    })
+    .catch(function() {
+      return fetch(NAKIOS_TELEGRAM, {
+        method: 'GET',
+        headers: { 'User-Agent': NAKIOS_UA }
+      })
+        .then(function(res) { return res.text(); })
+        .then(function(html) {
+          var m = html.match(/https?:\/\/nakios\.[a-z]+/gi);
+          if (!m) return null;
+          var domains = m.filter(function(u) {
+            return u.indexOf('t.me') === -1 && u.indexOf('telegram') === -1;
+          });
+          if (!domains.length) return null;
+          var base = domains[domains.length - 1].replace(/\/$/, '');
+          console.log('[Nakios] Domaine via Telegram:', base);
+          return base;
+        })
+        .catch(function() { return null; });
+    });
+}
+
+function applyNakiosDomain(base) {
+  NAKIOS_API     = base.replace(/\/$/, '') + '/api';
+  NAKIOS_REFERER = base.replace(/\/$/, '') + '/';
+}
 
 // ---------------------------------------------------------------
 // Récupère les sources d'un FILM
@@ -91,7 +143,7 @@ function normalizeSources(sources) {
       continue;
     }
 
-    var lang    = source.lang    || 'EN';
+    var lang    = source.lang    || 'MULTI';
     var quality = source.quality || 'HD';
     var isM3U8  = url.indexOf('.m3u8') !== -1 || source.isM3U8 === true;
 
@@ -126,6 +178,21 @@ function getStreams(tmdbId, mediaType, season, episode) {
       var results = normalizeSources(sources);
       console.log('[Nakios] ' + results.length + ' source(s) directe(s) trouvée(s)');
       return results;
+    })
+    .catch(function(err) {
+      console.warn('[Nakios] Échec domaine principal (' + err.message + '), détection nouveau domaine...');
+      return detectNakiosDomain().then(function(newBase) {
+        if (!newBase) throw new Error('Aucun domaine trouvé');
+        applyNakiosDomain(newBase);
+        var retryFetch = (mediaType === 'tv')
+          ? fetchTvSources(tmdbId, season, episode)
+          : fetchMovieSources(tmdbId);
+        return retryFetch.then(function(sources) {
+          var results = normalizeSources(sources);
+          console.log('[Nakios] ' + results.length + ' source(s) après fallback');
+          return results;
+        });
+      });
     })
     .catch(function(err) {
       console.error('[Nakios] Erreur: ' + (err.message || String(err)));
