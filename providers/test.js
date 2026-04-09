@@ -91,7 +91,7 @@ function normalizeSources(sources) {
       continue;
     }
 
-    var lang    = source.lang    || 'Multi-Audio';
+    var lang    = source.lang    || 'EN';
     var quality = source.quality || 'HD';
     var isM3U8  = url.indexOf('.m3u8') !== -1 || source.isM3U8 === true;
 
