@@ -381,6 +381,20 @@
       "contentLanguage": ["en", "fr"]
     },
     {
+      "id": "nakios",
+      "name": "Nakios",
+      "description": "Mainly French, Some English & 4K Quality",
+      "version": "1.0.0",
+      "author": "Wooodyhood",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/nakios.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "limited": true,
+      "logo": "",
+      "contentLanguage": ["fr", "en"]
+    },
+    {
       "id": "netmirror",
       "name": "Netmirror",
       "description": "Streaming links from Netmirror (Netflix, Prime, Disney etc).",
@@ -443,19 +457,6 @@
       "enabled": true,
       "formats": ["mp4", "m3u8"],
       "logo": "https://i.postimg.cc/4yVjQjpH/streamflix.png",
-      "contentLanguage": ["en"]
-    },
-    {
-      "id": "test",
-      "name": "Test",
-      "description": "Direct links via StreamFlix API",
-      "version": "1.0.0",
-      "author": "Nuvio Team",
-      "supportedTypes": ["movie", "tv"],
-      "filename": "providers/test.js",
-      "enabled": true,
-      "formats": ["mp4", "m3u8"],
-      "logo": "",
       "contentLanguage": ["en"]
     },
     {
