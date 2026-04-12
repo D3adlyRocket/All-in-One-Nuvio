@@ -3,7 +3,6 @@
 
 console.log('[DahmerMovies] Initializing Dahmer Movies scraper');
 
-// Constants
 const TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 const DAHMER_MOVIES_API = 'https://a.111477.xyz';
 const TIMEOUT = 60000;
@@ -12,32 +11,12 @@ function makeRequest(url, options = {}) {
     return fetch(url, {
         timeout: TIMEOUT,
         headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            ...options.headers
-        },
-        ...options
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
     }).then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res;
     });
-}
-
-function getEpisodeSlug(season = null, episode = null) {
-    if (season === null) return ['', ''];
-    return [season < 10 ? `0${season}` : `${season}`, episode < 10 ? `0${episode}` : `${episode}`];
-}
-
-function getQualityWithCodecs(str) {
-    if (!str) return 'Unknown';
-    const qualityMatch = str.match(/(\d{3,4})[pP]/);
-    const baseQuality = qualityMatch ? `${qualityMatch[1]}p` : 'Unknown';
-    const codecs = [];
-    const lowerStr = str.toLowerCase();
-    if (lowerStr.includes('dv')) codecs.push('DV');
-    if (lowerStr.includes('hdr10')) codecs.push('HDR10');
-    else if (lowerStr.includes('hdr')) codecs.push('HDR');
-    if (lowerStr.includes('remux')) codecs.push('REMUX');
-    return codecs.length > 0 ? `${baseQuality} | ${codecs.join(' | ')}` : baseQuality;
 }
 
 function parseLinks(html) {
@@ -60,13 +39,10 @@ function invokeDahmerMovies(title, year, season = null, episode = null) {
         ? `${title.replace(/:/g, '')} (${year})`
         : `${title.replace(/:/g, ' -')}`;
 
-    // Standard encoding for the fetch request
     const requestFolder = encodeURIComponent(folderName);
     const pathType = season === null ? 'movies' : 'tvs';
     const requestUrl = `${DAHMER_MOVIES_API}/${pathType}/${requestFolder}/`;
     
-    console.log(`[DahmerMovies] Searching folder: ${requestUrl}`);
-
     return makeRequest(requestUrl).then(res => res.text()).then(html => {
         const paths = parseLinks(html);
         let filteredPaths;
@@ -74,39 +50,46 @@ function invokeDahmerMovies(title, year, season = null, episode = null) {
         if (season === null) {
             filteredPaths = paths.filter(path => /(1080p|2160p)/i.test(path.text));
         } else {
-            const [s, e] = getEpisodeSlug(season, episode);
+            const s = season < 10 ? `0${season}` : `${season}`;
+            const e = episode < 10 ? `0${episode}` : `${episode}`;
             const epPattern = new RegExp(`S${s}E${e}`, 'i');
             filteredPaths = paths.filter(path => epPattern.test(path.text));
         }
         
-        // This is the specific encoding logic you requested for the final output
-        const fixUrlEncoding = (url) => {
-            return url.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
+        // Final Formatting Rule: Replace spaces and parens only
+        const formatForUrl = (str) => {
+            // Decode first to ensure we don't double encode % symbols
+            const decoded = decodeURIComponent(str);
+            return decoded.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
         };
 
         return filteredPaths.map(path => {
             let finalUrl;
-            
-            // Reconstruct the URL properly
-            // Folder name part needs the specific ( ) encoding
-            const finalFolderName = fixUrlEncoding(folderName);
-            const finalFileName = fixUrlEncoding(path.href);
-            
-            finalUrl = `${DAHMER_MOVIES_API}/${pathType}/${finalFolderName}/${finalFileName}`;
+
+            // FIX: Check if the scraped href already includes the folder structure
+            if (path.href.startsWith('/movies/') || path.href.startsWith('/tvs/')) {
+                // It's an absolute path, so just attach it to the domain
+                finalUrl = DAHMER_MOVIES_API + formatForUrl(path.href);
+            } else if (path.href.startsWith('http')) {
+                // It's already a full URL
+                finalUrl = formatForUrl(path.href);
+            } else {
+                // It's just a filename, so use the full constructed path
+                const finalFolderName = formatForUrl(folderName);
+                const finalFileName = formatForUrl(path.href);
+                finalUrl = `${DAHMER_MOVIES_API}/${pathType}/${finalFolderName}/${finalFileName}`;
+            }
             
             return {
                 name: "DahmerMovies",
                 title: `DahmerMovies ${path.text}`,
                 url: finalUrl,
-                quality: getQualityWithCodecs(path.text),
+                quality: path.text.includes('2160p') ? '2160p' : '1080p',
                 provider: "dahmermovies",
                 filename: path.text
             };
         });
-    }).catch(err => {
-        console.log(`[DahmerMovies] Fetch Error: ${err.message}`);
-        return [];
-    });
+    }).catch(() => []);
 }
 
 function getStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = null) {
