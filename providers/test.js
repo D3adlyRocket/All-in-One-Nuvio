@@ -28,7 +28,8 @@ function parseLinks(html) {
         if (!linkMatch) continue;
         const href = linkMatch[1];
         const text = linkMatch[2].trim();
-        if (!text || href === '../' || text === '../') continue;
+        // Ignore parent directory or empty links
+        if (!text || href === '../' || text === '../' || href.includes('?C=')) continue;
         links.push({ text, href });
     }
     return links;
@@ -39,9 +40,9 @@ function invokeDahmerMovies(title, year, season = null, episode = null) {
         ? `${title.replace(/:/g, '')} (${year})`
         : `${title.replace(/:/g, ' -')}`;
 
-    const requestFolder = encodeURIComponent(folderName);
     const pathType = season === null ? 'movies' : 'tvs';
-    const requestUrl = `${DAHMER_MOVIES_API}/${pathType}/${requestFolder}/`;
+    // The request URL used to browse the directory
+    const requestUrl = `${DAHMER_MOVIES_API}/${pathType}/${encodeURIComponent(folderName)}/`;
     
     return makeRequest(requestUrl).then(res => res.text()).then(html => {
         const paths = parseLinks(html);
@@ -56,29 +57,18 @@ function invokeDahmerMovies(title, year, season = null, episode = null) {
             filteredPaths = paths.filter(path => epPattern.test(path.text));
         }
         
-        // Final Formatting Rule: Replace spaces and parens only
-        const formatForUrl = (str) => {
-            // Decode first to ensure we don't double encode % symbols
-            const decoded = decodeURIComponent(str);
-            return decoded.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
-        };
-
         return filteredPaths.map(path => {
-            let finalUrl;
+            // Use the built-in URL constructor to resolve the link.
+            // If path.href is "/movies/...", it automatically ignores the folder part of requestUrl.
+            // If path.href is "filename.mkv", it correctly appends it.
+            let resolvedUrl = new URL(path.href, requestUrl).href;
 
-            // FIX: Check if the scraped href already includes the folder structure
-            if (path.href.startsWith('/movies/') || path.href.startsWith('/tvs/')) {
-                // It's an absolute path, so just attach it to the domain
-                finalUrl = DAHMER_MOVIES_API + formatForUrl(path.href);
-            } else if (path.href.startsWith('http')) {
-                // It's already a full URL
-                finalUrl = formatForUrl(path.href);
-            } else {
-                // It's just a filename, so use the full constructed path
-                const finalFolderName = formatForUrl(folderName);
-                const finalFileName = formatForUrl(path.href);
-                finalUrl = `${DAHMER_MOVIES_API}/${pathType}/${finalFolderName}/${finalFileName}`;
-            }
+            // Final step: Apply your specific encoding requirements for ( ) and spaces
+            // We decode first to ensure we aren't double-encoding % characters
+            const finalUrl = decodeURIComponent(resolvedUrl)
+                .replace(/ /g, '%20')
+                .replace(/\(/g, '%28')
+                .replace(/\)/g, '%29');
             
             return {
                 name: "DahmerMovies",
