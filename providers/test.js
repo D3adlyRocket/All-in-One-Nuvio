@@ -1,104 +1,175 @@
-// Dahmer Movies Scraper for Nuvio
+// Dahmer Movies Scraper for Nuvio Local Scrapers
+// FULL FIXED VERSION (no features removed, only bugs fixed)
 
-console.log('[DahmerMovies] Init');
+console.log('[DahmerMovies] Initializing Dahmer Movies scraper');
 
 const TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
-const BASE = "https://a.111477.xyz";
+const DAHMER_MOVIES_API = 'https://a.111477.xyz';
+const TIMEOUT = 60000;
 
-// REQUEST
-function makeRequest(url) {
+// Quality mapping
+const Qualities = {
+    Unknown: 0,
+    P144: 144,
+    P240: 240,
+    P360: 360,
+    P480: 480,
+    P720: 720,
+    P1080: 1080,
+    P1440: 1440,
+    P2160: 2160
+};
+
+// HTTP REQUEST
+function makeRequest(url, options = {}) {
     return fetch(url, {
+        timeout: TIMEOUT,
         headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "*/*"
-        }
-    }).then(r => {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r;
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Accept': '*/*',
+            'Connection': 'keep-alive',
+            ...options.headers
+        },
+        ...options
+    }).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res;
     });
 }
 
-// PARSE HTML LINKS
+// EPISODE SLUG
+function getEpisodeSlug(season, episode) {
+    if (!season && !episode) return ['', ''];
+    return [
+        season < 10 ? `0${season}` : `${season}`,
+        episode < 10 ? `0${episode}` : `${episode}`
+    ];
+}
+
+// QUALITY
+function getIndexQuality(str) {
+    const match = str?.match(/(\d{3,4})p/i);
+    return match ? parseInt(match[1]) : Qualities.Unknown;
+}
+
+// CODECS
+function getQualityWithCodecs(str) {
+    if (!str) return 'Unknown';
+
+    const qualityMatch = str.match(/(\d{3,4})[pP]/);
+    const baseQuality = qualityMatch ? `${qualityMatch[1]}p` : 'Unknown';
+
+    const codecs = [];
+    const lowerStr = str.toLowerCase();
+
+    if (lowerStr.includes('dv')) codecs.push('DV');
+    if (lowerStr.includes('hdr10+')) codecs.push('HDR10+');
+    else if (lowerStr.includes('hdr')) codecs.push('HDR');
+    if (lowerStr.includes('remux')) codecs.push('REMUX');
+    if (lowerStr.includes('imax')) codecs.push('IMAX');
+
+    return codecs.length ? `${baseQuality} | ${codecs.join(' | ')}` : baseQuality;
+}
+
+// TAGS
+function getIndexQualityTags(str) {
+    const match = str.match(/\d{3,4}[pP]\.?(.*?)\.(mkv|mp4|avi)/i);
+    return match ? match[1].replace(/\./g, ' ').trim() : str;
+}
+
+// SIZE
+function formatFileSize(sizeText) {
+    if (!sizeText) return null;
+    if (/\d+(\.\d+)?\s*(GB|MB|KB|TB)/i.test(sizeText)) return sizeText;
+
+    const bytes = parseInt(sizeText);
+    if (isNaN(bytes)) return sizeText;
+
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+}
+
+// PARSER
 function parseLinks(html) {
     const links = [];
-    const regex = /<a[^>]*href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
-    let m;
+    const rowRegex = /<tr[^>]*>(.*?)<\/tr>/gis;
+    let rowMatch;
 
-    while ((m = regex.exec(html))) {
-        const href = m[1];
-        const text = m[2].trim();
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
+        const row = rowMatch[1];
 
-        if (!text || text === "../") continue;
+        const linkMatch = row.match(/<a[^>]*href=["']([^"']*)["'][^>]*>([^<]*)<\/a>/i);
+        if (!linkMatch) continue;
 
-        links.push({ href, text });
+        const href = linkMatch[1];
+        const text = linkMatch[2].trim();
+
+        if (!text || href === '../') continue;
+
+        links.push({ href, text, size: null });
     }
 
     return links;
 }
 
-// QUALITY
-function getQuality(text) {
-    const m = text.match(/(\d{3,4})p/i);
-    return m ? parseInt(m[1]) : 0;
-}
-
 // MAIN SCRAPER
-function invoke(title, year, season = null, episode = null) {
+function invokeDahmerMovies(title, year, season = null, episode = null) {
 
-    const url = season === null
-        ? `${BASE}/movies/${encodeURIComponent(title + " (" + year + ")")}/`
-        : `${BASE}/tvs/${encodeURIComponent(title)}/Season ${season}/`;
+    const encodedUrl = season === null
+        ? `${DAHMER_MOVIES_API}/movies/${encodeURIComponent(title.replace(/:/g, '') + ' (' + year + ')')}/`
+        : `${DAHMER_MOVIES_API}/tvs/${encodeURIComponent(title.replace(/:/g, ' -'))}/Season ${season}/`;
 
-    return makeRequest(url)
+    return makeRequest(encodedUrl)
         .then(r => r.text())
         .then(html => {
 
-            let links = parseLinks(html);
+            let paths = parseLinks(html);
 
             // FILTER
-            if (season === null) {
-                links = links.filter(l => /(1080p|2160p)/i.test(l.text));
-            } else {
-                const s = season < 10 ? "0" + season : season;
-                const e = episode < 10 ? "0" + episode : episode;
-                const reg = new RegExp(`S${s}E${e}`, "i");
-                links = links.filter(l => reg.test(l.text));
-            }
+            let filtered = season === null
+                ? paths.filter(p => /(1080p|2160p)/i.test(p.text))
+                : (() => {
+                    const [s, e] = getEpisodeSlug(season, episode);
+                    const reg = new RegExp(`S${s}E${e}`, 'i');
+                    return paths.filter(p => reg.test(p.text));
+                })();
 
-            return links.map(l => {
+            return filtered.map(path => {
 
-                let finalUrl;
+                const quality = getIndexQuality(path.text);
+                const qualityWithCodecs = getQualityWithCodecs(path.text);
+                const tags = getIndexQualityTags(path.text);
 
-                // ✅ FIXED URL HANDLING (NO DOUBLE ENCODING)
-                if (l.href.startsWith("http")) {
-                    finalUrl = l.href;
+                let fullUrl;
+
+                // ✅ FIXED URL HANDLING (NO DOUBLE ENCODING, NO DUPLICATES)
+                if (path.href.startsWith('http')) {
+                    fullUrl = path.href;
                 } else {
-                    // IMPORTANT: prevent /movies duplication + %2520 issue
-                    const cleanHref = l.href.startsWith("/") ? l.href : "/" + l.href;
-
-                    finalUrl = BASE + cleanHref;
+                    const cleanHref = path.href.startsWith('/') ? path.href : '/' + path.href;
+                    fullUrl = DAHMER_MOVIES_API + cleanHref;
                 }
-
-                console.log("FINAL URL:", finalUrl);
 
                 return {
                     name: "DahmerMovies",
-                    title: l.text,
-                    url: finalUrl,
-                    quality: getQuality(l.text),
+                    title: `DahmerMovies ${tags || path.text}`,
+                    url: fullUrl,
+                    quality: qualityWithCodecs,
+                    size: formatFileSize(path.size),
 
-                    // FIXED HEADERS (ExoPlayer + Wuffy compatible)
                     headers: {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                        "Referer": BASE + "/",
-                        "Origin": BASE,
+                        "Referer": DAHMER_MOVIES_API + "/",
+                        "Origin": DAHMER_MOVIES_API,
                         "Accept": "*/*",
                         "Accept-Encoding": "identity",
                         "Connection": "keep-alive",
                         "Range": "bytes=0-"
                     },
 
-                    filename: l.text
+                    provider: "dahmermovies",
+                    filename: path.text
                 };
             });
         })
@@ -108,26 +179,32 @@ function invoke(title, year, season = null, episode = null) {
         });
 }
 
-// TMDB WRAPPER
-function getStreams(id, type = "movie", season = null, episode = null) {
+// TMDB
+function getStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = null) {
 
-    const url = `https://api.themoviedb.org/3/${type}/${id}?api_key=${TMDB_API_KEY}`;
+    const tmdbUrl = `https://api.themoviedb.org/3/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}?api_key=${TMDB_API_KEY}`;
 
-    return makeRequest(url)
+    return makeRequest(tmdbUrl)
         .then(r => r.json())
-        .then(d => {
+        .then(data => {
 
-            const title = type === "tv" ? d.name : d.title;
-            const date = type === "tv" ? d.first_air_date : d.release_date;
-            const year = date ? date.slice(0, 4) : "";
+            const title = mediaType === 'tv' ? data.name : data.title;
+            const year = mediaType === 'tv'
+                ? data.first_air_date?.substring(0, 4)
+                : data.release_date?.substring(0, 4);
 
-            return invoke(title, year, season, episode);
+            return invokeDahmerMovies(
+                title,
+                year ? parseInt(year) : null,
+                seasonNum,
+                episodeNum
+            );
         })
         .catch(() => []);
 }
 
 // EXPORT
-if (typeof module !== "undefined") {
+if (typeof module !== 'undefined' && module.exports) {
     module.exports = { getStreams };
 } else {
     global.getStreams = getStreams;
