@@ -29,37 +29,16 @@ function getStreams(id, mediaType, season, episode) {
     .then(function(data) {
         if (!data || !data.servers) return [];
 
-        return data.servers.map(function(s) {
-            // Using a simple check to find the key
-            var k = s.key;
-            if(!k) k = s.id;
-
-            var playbackUrl = PRIMESRC_BASE + "l?key=" + k;
-            
-            // Apply the headers you provided for Voe and Streamtape
-            // We use a simple if/else to keep the fetch stable
-            var ref = "https://primesrc.me/";
-            var org = "https://primesrc.me";
-
-            if (s.name == "Voe") {
-                ref = "https://marissasharecareer.com/";
-                org = "https://marissasharecareer.com";
-            }
-            if (s.name == "Streamtape") {
-                ref = "https://streamta.site/";
-                org = "https://streamta.site";
-            }
-
+        return data.servers.map(function(server) {
             return {
-                name: "PrimeSrc - " + s.name,
-                url: playbackUrl,
+                name: "PrimeSrc - " + server.name,
+                url: PRIMESRC_BASE + "l?key=" + server.key,
                 quality: "1080p",
                 headers: { 
                     "User-Agent": ua,
-                    "Referer": ref,
-                    "Origin": org,
+                    "Referer": "https://streamta.site/",
+                    "Origin": "https://streamta.site",
                     "Accept": "*/*",
-                    "Accept-Encoding": "identity;q=1, *;q=0",
                     "sec-ch-ua-platform": "Android",
                     "sec-ch-ua-mobile": "?1"
                 }
