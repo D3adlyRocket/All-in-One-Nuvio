@@ -1,66 +1,59 @@
-// PrimeSrc Scraper for Nuvio - Direct Link Fix
-const PRIMESRC_BASE = "https://primesrc.me/api/v1/";
+// PrimeSrc Scraper for Nuvio - BASIC VERSION
 const PRIMESRC_SITE = "https://primesrc.me";
 
 function getStreams(id, mediaType, season, episode) {
     var type = (season && episode) ? "tv" : "movie";
-    var url = PRIMESRC_BASE + "list_servers?type=" + type;
+    var queryPath = "type=" + type;
 
-    // Handle IMDB or TMDB
+    // Direct IMDB/TMDB support as per your docs
     if (typeof id === 'string' && id.startsWith('tt')) {
-        url += "&imdb=" + id;
+        queryPath += "&imdb=" + id;
     } else {
-        url += "&tmdb=" + id;
+        queryPath += "&tmdb=" + id;
     }
 
     if (type === "tv") {
-        url += "&season=" + season + "&episode=" + episode;
+        queryPath += "&season=" + season + "&episode=" + episode;
     }
 
-    var headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": PRIMESRC_SITE + "/"
-    };
+    var listUrl = "https://primesrc.me/api/v1/list_servers?" + queryPath;
 
-    return fetch(url, { headers: headers })
-    .then(function(r) { return r.json(); })
+    return fetch(listUrl, {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Referer": PRIMESRC_SITE + "/"
+        }
+    })
+    .then(function(r) { 
+        if (!r.ok) return null;
+        return r.json(); 
+    })
     .then(function(data) {
         if (!data || !data.servers) return [];
 
-        // Map through servers and attempt to resolve direct links
-        var promises = data.servers.map(function(server) {
-            return fetch(PRIMESRC_BASE + "l?key=" + server.key, { headers: headers })
-            .then(function(res) { return res.json(); })
-            .then(function(linkData) {
-                if (!linkData || !linkData.link) return null;
+        return data.servers.map(function(server) {
+            // We use the Embed URL because the 'l' endpoint often requires 
+            // browser cookies/tokens that a scraper can't easily get.
+            var embedUrl = PRIMESRC_SITE + "/embed/" + type + "?" + queryPath;
+            
+            // Add the whitelist parameter to force this specific server
+            embedUrl += "&whitelistServers=" + encodeURIComponent(server.name);
 
-                var finalUrl = linkData.link;
-
-                // FIX: If the link is an embed (contains /e/ or /embed/), 
-                // ExoPlayer will throw error 23003. 
-                // We must provide the Referer so the player can 'handshake' the file.
-                return {
-                    name: "PrimeSrc - " + (server.name || "Direct"),
-                    url: finalUrl,
-                    quality: "1080p",
-                    headers: {
-                        "Referer": PRIMESRC_SITE + "/",
-                        "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36",
-                        "Origin": PRIMESRC_SITE
-                    },
-                    // This flag tells Nuvio to treat it as a video, not a page
-                    isDirect: true, 
-                    provider: "primesrc"
-                };
-            })
-            .catch(function() { return null; });
-        });
-
-        return Promise.all(promises).then(function(results) {
-            return results.filter(function(s) { return s !== null; });
+            return {
+                name: "PrimeSrc: " + (server.name || "Server"),
+                url: embedUrl,
+                quality: "Auto",
+                headers: {
+                    "Referer": PRIMESRC_SITE + "/",
+                    "User-Agent": "Mozilla/5.0 (Linux; Android 10)"
+                }
+            };
         });
     })
-    .catch(function() { return []; });
+    .catch(function(err) {
+        console.log("[PrimeSrc] Fetch Error: " + err.message);
+        return [];
+    });
 }
 
 if (typeof module !== "undefined" && module.exports) {
