@@ -1,79 +1,82 @@
-// PrimeSrc Scraper for Nuvio 
-// Simplified for Hermes Engine compatibility
+var PRIMESRC_API = "https://primesrc.me/api/v1/";
 
-function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
-    return new Promise(function(resolve, reject) {
-        var isImdb = (typeof tmdbId === 'string' && tmdbId.indexOf('tt') === 0);
-        var type = (seasonNum && episodeNum) ? "tv" : "movie";
-        
-        // Use the official endpoint from your docs
-        var searchUrl = "https://primesrc.me/api/v1/list_servers?type=" + type;
-        searchUrl += isImdb ? ("&imdb=" + tmdbId) : ("&tmdb=" + tmdbId);
-        
-        if (type === "tv") {
-            searchUrl += "&season=" + seasonNum + "&episode=" + episodeNum;
+function getStreams(id, mediaType, season, episode) {
+    var isImdb = (typeof id === 'string' && id.indexOf('tt') === 0);
+    var type = (season && episode) ? "tv" : "movie";
+    
+    // Step 1: Build Search URL
+    var searchUrl = PRIMESRC_API + "list_servers?type=" + type;
+    if (isImdb) {
+        searchUrl += "&imdb=" + id;
+    } else {
+        searchUrl += "&tmdb=" + id;
+    }
+    
+    if (type === "tv") {
+        searchUrl += "&season=" + season + "&episode=" + episode;
+    }
+
+    var ua = "Mozilla/5.0 (Linux; Android 15; ALT-NX1 Build/HONORALT-N31; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/146.0.7680.177 Mobile Safari/537.36";
+
+    // Step 2: Fetch the Server List
+    return fetch(searchUrl, {
+        headers: { "User-Agent": ua, "Referer": "https://primesrc.me/" }
+    })
+    .then(function(res) { 
+        return res.json(); 
+    })
+    .then(function(data) {
+        if (!data || !data.servers || data.servers.length === 0) return [];
+
+        // Step 3: Resolve the first 5 servers (limiting to avoid sandbox timeout)
+        var serverSubset = data.servers.slice(0, 5);
+        var fetchPromises = [];
+
+        for (var i = 0; i < serverSubset.length; i++) {
+            (function(server) {
+                var p = fetch(PRIMESRC_API + "l?key=" + server.key, {
+                    headers: { "User-Agent": ua, "Referer": "https://primesrc.me/" }
+                })
+                .then(function(lRes) { return lRes.json(); })
+                .then(function(lData) {
+                    if (!lData || !lData.link) return null;
+
+                    var sUrl = lData.link;
+                    var streamRef = "https://primesrc.me/";
+                    
+                    // Apply your log-based fixes for the 23003 error
+                    if (sUrl.indexOf("streamta.site") !== -1) streamRef = "https://streamta.site/";
+                    if (sUrl.indexOf("cloudatacdn.com") !== -1) streamRef = "https://playmogo.com/";
+
+                    return {
+                        name: "PrimeSrc: " + server.name,
+                        url: sUrl,
+                        quality: "1080p",
+                        headers: {
+                            "User-Agent": ua,
+                            "Referer": streamRef,
+                            "Origin": streamRef.replace(/\/$/, ""),
+                            "Accept": "*/*"
+                        }
+                    };
+                })
+                .catch(function() { return null; });
+                
+                fetchPromises.push(p);
+            })(serverSubset[i]);
         }
 
-        var userAgent = "Mozilla/5.0 (Linux; Android 15; ALT-NX1) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/146.0.0.0 Mobile Safari/537.36";
-
-        fetch(searchUrl, {
-            headers: { "User-Agent": userAgent, "Referer": "https://primesrc.me/" }
-        })
-        .then(function(response) { 
-            return response.json(); 
-        })
-        .then(function(data) {
-            if (!data || !data.servers || data.servers.length === 0) {
-                resolve([]);
-                return;
+        return Promise.all(fetchPromises).then(function(allResults) {
+            var validResults = [];
+            for (var k = 0; k < allResults.length; k++) {
+                if (allResults[k] !== null) validResults.push(allResults[k]);
             }
-
-            var results = [];
-            var pending = data.servers.length;
-
-            data.servers.forEach(function(server) {
-                var linkUrl = "https://primesrc.me/api/v1/l?key=" + server.key;
-                
-                fetch(linkUrl, {
-                    headers: { "User-Agent": userAgent, "Referer": "https://primesrc.me/" }
-                })
-                .then(function(res) { return res.json(); })
-                .then(function(ld) {
-                    if (ld && ld.link) {
-                        var streamUrl = ld.link;
-                        var ref = "https://primesrc.me/";
-                        
-                        // Apply the exact headers from your logs
-                        if (streamUrl.indexOf("streamta.site") !== -1) ref = "https://streamta.site/";
-                        if (streamUrl.indexOf("cloudatacdn.com") !== -1) ref = "https://playmogo.com/";
-
-                        results.push({
-                            name: "PrimeSrc: " + server.name,
-                            url: streamUrl,
-                            quality: "1080p",
-                            headers: {
-                                "User-Agent": userAgent,
-                                "Referer": ref,
-                                "Origin": ref.replace(/\/$/, ""),
-                                "Accept": "*/*"
-                            }
-                        });
-                    }
-                })
-                .catch(function(e) { /* ignore single server error */ })
-                .finally(function() {
-                    pending--;
-                    if (pending === 0) resolve(results);
-                });
-            });
-        })
-        .catch(function(err) {
-            console.error("[PrimeSrc] Error: " + err.message);
-            resolve([]);
+            return validResults;
         });
+    })
+    .catch(function(err) {
+        return [];
     });
 }
 
-if (typeof module !== 'undefined') {
-    module.exports = { getStreams: getStreams };
-}
+if (typeof module !== 'undefined') module.exports = { getStreams: getStreams };
