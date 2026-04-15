@@ -30,39 +30,42 @@ function getStreams(id, mediaType, season, episode) {
         if (!data || !data.servers) return [];
 
         return data.servers.map(function(server) {
-            // Since /l?key= was returning undefined, we go back to the 
-            // embed structure BUT we add the specific headers you provided
-            // to the object so the player can actually handshake with the site.
-            
-            var embedUrl = PRIMESRC_SITE + "/embed/" + type + "?";
-            if (typeof id === 'string' && id.indexOf('tt') === 0) {
-                embedUrl += "imdb=" + id;
-            } else {
-                embedUrl += "tmdb=" + id;
-            }
+            var name = server.name;
+            var finalUrl = "";
+            var ref = "https://primesrc.me/";
+            var org = "https://primesrc.me";
 
-            if (type === "tv") {
-                embedUrl += "&season=" + season + "&episode=" + episode;
+            // If the server is Voe, we point it to the direct API redirector 
+            // but use the Marissa referer you provided
+            if (name == "Voe") {
+                finalUrl = PRIMESRC_BASE + "l?key=" + server.key;
+                ref = "https://marissasharecareer.com/";
+                org = "https://marissasharecareer.com";
+            } 
+            // For Streamtape, we use the streamta referer
+            else if (name == "Streamtape") {
+                finalUrl = PRIMESRC_BASE + "l?key=" + server.key;
+                ref = "https://streamta.site/";
+                org = "https://streamta.site";
             }
-            
-            embedUrl += "&whitelistServers=" + encodeURIComponent(server.name);
-
-            // Determine which referer to use based on the server name
-            var playRef = "https://streamta.site/";
-            if (server.name === "Voe") {
-                playRef = "https://marissasharecareer.com/";
+            // Fallback for others
+            else {
+                finalUrl = PRIMESRC_BASE + "l?key=" + server.key;
+                ref = "https://primesrc.me/";
             }
 
             return {
-                name: "PrimeSrc - " + server.name,
-                url: embedUrl,
+                name: "PrimeSrc - " + name,
+                url: finalUrl,
                 quality: "1080p",
                 headers: { 
                     "User-Agent": ua,
-                    "Referer": playRef,
-                    "Origin": playRef.replace(/\/$/, ""),
+                    "Referer": ref,
+                    "Origin": org,
                     "Accept": "*/*",
-                    "Accept-Encoding": "identity;q=1, *;q=0"
+                    "Accept-Encoding": "identity;q=1, *;q=0",
+                    "sec-ch-ua-platform": "Android",
+                    "sec-ch-ua-mobile": "?1"
                 }
             };
         });
