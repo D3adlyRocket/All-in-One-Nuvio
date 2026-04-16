@@ -1,43 +1,64 @@
 // ============================================================
-// Einthusan Fixed Provider - Link Found + Spin Fix
+// Einthusan Provider - Solid Extraction + Spin Fix
 // ============================================================
 
 var BASE_URL = 'https://einthusan.tv';
 
-// Using the EXACT headers you provided to ensure the session matches
 var HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Linux; Android 15; ALT-NX1 Build/HONORALT-N31; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/146.0.7680.177 Mobile Safari/537.36',
   'Referer': 'https://einthusan.tv/',
   'sec-ch-ua': '"Chromium";v="146", "Not-A.Brand";v="24", "Android WebView";v="146"',
-  'sec-ch-ua-mobile': '?1',
-  'sec-ch-ua-platform': '"Android"',
   'Accept': '*/*',
   'Accept-Encoding': 'identity;q=1, *;q=0'
 };
 
 function getStreams(tmdbId, mediaType) {
   return new Promise(function (resolve) {
-    // Hardcoded test ID for '21lw'
+    // Testing with ID 21lw - Hindi
     var watchUrl = BASE_URL + '/movie/watch/21lw/?lang=hindi';
 
     fetch(watchUrl, { headers: HEADERS })
       .then(function (res) { return res.text(); })
       .then(function (html) {
-        // The regex that successfully found the link before
-        var streamPattern = /["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i;
-        var match = html.match(streamPattern);
+        if (!html) {
+          console.log('Error: Empty HTML response');
+          return resolve([]);
+        }
 
-        if (match) {
-          // FIX 1: Clean the URL (Removing &amp; and backslashes)
-          var cleanUrl = match[1].replace(/&amp;/g, '&').replace(/\\/g, '').trim();
-          
-          console.log('Link Found & Cleaned: ' + cleanUrl);
+        // --- MULTI-STAGE EXTRACTION ---
+        // We look for cdn1, then generic mp4/m3u8, then encoded links
+        var patterns = [
+          /["'](https?:\/\/cdn1\.einthusan\.io\/[^"']+)["']/i,
+          /["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i,
+          /file\s*:\s*["']([^"']+)["']/i
+        ];
+
+        var streamUrl = null;
+        for (var i = 0; i < patterns.length; i++) {
+          var match = html.match(patterns[i]);
+          if (match && match[1]) {
+            streamUrl = match[1];
+            break; 
+          }
+        }
+
+        if (streamUrl) {
+          // --- BULLETPROOF CLEANING ---
+          // 1. Fix HTML entities
+          streamUrl = streamUrl.replace(/&amp;/g, '&');
+          // 2. Remove escape backslashes
+          streamUrl = streamUrl.replace(/\\/g, '');
+          // 3. Trim whitespace or quotes
+          streamUrl = streamUrl.trim().replace(/^["']|["']$/g, '');
+
+          console.log('SUCCESS: Link extracted -> ' + streamUrl);
 
           resolve([{
-            url: cleanUrl,
+            url: streamUrl,
             quality: 'HD',
-            format: cleanUrl.indexOf('m3u8') !== -1 ? 'm3u8' : 'mp4',
-            // FIX 2: Forward headers to the player to stop the infinite spin
+            format: streamUrl.indexOf('m3u8') !== -1 ? 'm3u8' : 'mp4',
+            // --- THE SPIN FIX ---
+            // The player MUST send these or the CDN will hang the socket (spin forever)
             headers: {
               'User-Agent': HEADERS['User-Agent'],
               'Referer': 'https://einthusan.tv/',
@@ -46,12 +67,12 @@ function getStreams(tmdbId, mediaType) {
             }
           }]);
         } else {
-          console.log('No link found in HTML.');
+          console.log('FAILURE: No stream link found in HTML source');
           resolve([]);
         }
       })
       .catch(function (err) {
-        console.log('Fetch error: ' + err);
+        console.log('CRITICAL FETCH ERROR: ' + err);
         resolve([]);
       });
   });
