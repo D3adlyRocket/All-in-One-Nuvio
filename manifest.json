@@ -251,6 +251,19 @@
       "contentLanguage": ["en", "hi"]
     },
     {
+      "id": "fmovies",
+      "name": "FMovies+",
+      "description": "Hindi Dubbed Movies/Series",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/fmovies.js",
+      "enabled": true,
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "https://i.postimg.cc/SQL5mmpm/fmovies.png",
+      "contentLanguage": ["en", "hi"]
+    },
+    {
       "id": "hdhub4u",
       "name": "HDHub4u",
       "description": "Direct links from HDHub4u with high-speed download support",
@@ -507,19 +520,6 @@
       "filename": "providers/test2.js",
       "enabled": true,
       "formats": ["mp4", "m3u8"],
-      "logo": "",
-      "contentLanguage": ["en"]
-    },
-    {
-      "id": "test3",
-      "name": "Test3",
-      "description": "Direct links via ShowBox API",
-      "version": "1.0.0",
-      "author": "Nuvio Team",
-      "supportedTypes": ["movie", "tv"],
-      "filename": "providers/test3.js",
-      "enabled": true,
-      "formats": ["mp4", "mkv", "m3u8"],
       "logo": "",
       "contentLanguage": ["en"]
     },
