@@ -8,7 +8,7 @@ const HEADERS = {
 };
 
 const DECRYPT_API = 'https://enc-dec.app/api/dec-videasy';
-const TMDB_API_KEY = '1c29a5198ee1854bd5eb45dbe8d17d92';
+const TMDB_API_KEY = 'd131017ccc6e5462a81c9304d21476de';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 const SERVERS = {
