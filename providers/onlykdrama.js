@@ -383,7 +383,7 @@ function resolveMoviePage(pageUrl, html) {
 }
 
 function extractEpisodeAnchors(html) {
-  var regex = /<a[^>]+href=["'](https:\/\/new2\.filepress\.wiki\/file\/([A-Za-z0-9]+))["'][^>]*>([\s\S]*?)<\/a>/gi;
+  var regex = /<a[^>]+href=["'](https:\/\/new3\.filepress\.wiki\/file\/([A-Za-z0-9]+))["'][^>]*>([\s\S]*?)<\/a>/gi;
   var results = [];
   var seen = {};
   var match;
