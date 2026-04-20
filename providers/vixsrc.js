@@ -154,10 +154,10 @@ function extractStreamFromPage(url, contentType, contentId, seasonNum, episodeNu
 
     if (contentType === 'movie') {
         vixsrcUrl = `${BASE_URL}/movie/${contentId}`;
-        subtitleApiUrl = `https://sub.wyzie.ru/search?id=${contentId}`;
+        subtitleApiUrl = `https://sub.wyzie.io/search?id=${contentId}`;
     } else {
         vixsrcUrl = `${BASE_URL}/tv/${contentId}/${seasonNum}/${episodeNum}`;
-        subtitleApiUrl = `https://sub.wyzie.ru/search?id=${contentId}&season=${seasonNum}&episode=${episodeNum}`;
+        subtitleApiUrl = `https://sub.wyzie.io/search?id=${contentId}&season=${seasonNum}&episode=${episodeNum}`;
     }
 
     console.log(`[Vixsrc] Fetching: ${vixsrcUrl}`);
