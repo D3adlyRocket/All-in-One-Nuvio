@@ -1,18 +1,17 @@
 // =============================================================
 // Provider Nuvio : Nakios (VF / VOSTFR / MULTI)
-// Version : 3.6.0
-// - Détection auto du domaine via nakios.online (page vitrine)
-// - Fallback sur nakios.fit si détection échoue
-// - URLs proxy → decodeURIComponent + domaine comme Referer
+// Version : 3.7.0
+// - Domaine récupéré automatiquement depuis domains.json (GitHub)
+// - Fallback sur nakios.fit si la lecture échoue
 // =============================================================
 
 var NAKIOS_UA       = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-var NAKIOS_VITRINE  = 'https://nakios.online/';
+var DOMAINS_URL     = 'https://raw.githubusercontent.com/wooodyhood/nuvio-repo/main/domains.json';
 var NAKIOS_FALLBACK = 'nakios.fit';
 
 var _cachedEndpoint = null;
 
-// ─── Détection du domaine actif ──────────────────────────────
+// ─── Construction de l'endpoint ──────────────────────────────
 
 function buildEndpoint(tld) {
   return {
@@ -22,37 +21,27 @@ function buildEndpoint(tld) {
   };
 }
 
+// ─── Récupération du domaine depuis GitHub ───────────────────
+
 function detectEndpoint() {
   if (_cachedEndpoint) {
     return Promise.resolve(_cachedEndpoint);
   }
 
-  return fetch(NAKIOS_VITRINE, { redirect: 'follow' })
-    .then(function(res) { return res.text(); })
-    .then(function(html) {
-      // 1. Chercher dans le HTML de la vitrine
-      var direct = html.match(/https?:\/\/nakios\.([a-z]{2,10})/i);
-      if (direct && direct[1] !== 'online') {
-        return direct[1];
-      }
-      // 2. Chercher dans le bundle JS
-      var bundleMatch = html.match(/src=["'](\/assets\/[^"']+\.js)["']/);
-      if (!bundleMatch) throw new Error('Bundle introuvable');
-      return fetch('https://nakios.online' + bundleMatch[1])
-        .then(function(r) { return r.text(); })
-        .then(function(js) {
-          var m = js.match(/https?:\/\/nakios\.([a-z]{2,10})/i);
-          if (!m || m[1] === 'online') throw new Error('Domaine introuvable dans bundle');
-          return m[1];
-        });
+  return fetch(DOMAINS_URL)
+    .then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
     })
-    .then(function(tld) {
-      console.log('[Nakios] Domaine détecté: nakios.' + tld);
+    .then(function(data) {
+      var tld = data.nakios;
+      if (!tld) throw new Error('Domaine nakios absent du fichier');
+      console.log('[Nakios] Domaine récupéré: nakios.' + tld);
       _cachedEndpoint = buildEndpoint(tld);
       return _cachedEndpoint;
     })
     .catch(function(err) {
-      console.warn('[Nakios] Détection échouée (' + (err.message || err) + '), fallback: ' + NAKIOS_FALLBACK);
+      console.warn('[Nakios] Lecture domains.json échouée (' + (err.message || err) + '), fallback: ' + NAKIOS_FALLBACK);
       _cachedEndpoint = buildEndpoint(NAKIOS_FALLBACK);
       return _cachedEndpoint;
     });
@@ -108,7 +97,6 @@ function resolveSource(source, endpoint) {
   }
 
   // URL proxy relative → /api/sources/proxy?url=ENCODED&s=xxx
-  // On garde l'URL proxy complète nakios — les segments ont chacun leur s= signé
   if (rawUrl.charAt(0) === '/') {
     return {
       url:     endpoint.base + rawUrl,
@@ -164,15 +152,14 @@ function getStreams(tmdbId, mediaType, season, episode) {
   return detectEndpoint()
     .then(function(endpoint) {
       return fetchSources(endpoint, tmdbId, mediaType, season, episode)
+        .then(function(sources) {
+          return normalizeSources(sources, endpoint);
+        })
         .catch(function(err) {
-          // Si l'endpoint détecté échoue, forcer re-détection au prochain appel
           console.warn('[Nakios] Endpoint ' + endpoint.base + ' KO, reset cache');
           _cachedEndpoint = null;
           throw err;
         });
-    })
-    .then(function(sources) {
-      return normalizeSources(sources, _cachedEndpoint);
     })
     .then(function(results) {
       console.log('[Nakios] ' + results.length + ' source(s) disponible(s)');
