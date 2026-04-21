@@ -9,24 +9,20 @@ const HEADERS = {
   'Connection': 'keep-alive'
 };
 
-const API = 'https://enc-dec.app/api';
+const API = 'https://enc-dec.app/api/dec-videasy';
 const TMDB_API_KEY = 'd131017ccc6e5462a81c9304d21476de';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 // Servidores em Português (Superflix, Overflix, VisãoCine)
 const SERVERS = {
-  'Superflix': {
-    url: 'https://api.videasy.net/superflix/sources-with-title',
-    language: 'Português'
-  },
-  'Overflix': {
-    url: 'https://api2.videasy.net/overflix/sources-with-title',
-    language: 'Português'
-  },
-  'VisãoCine': {
-    url: 'https://api.videasy.net/visioncine/sources-with-title',
-    language: 'Português'
-  }
+  'Superflix': {url: 'https://api.videasy.net/superflix/sources-with-title',
+    language: 'Português'},
+  'Overflix': {url: 'https://api2.videasy.net/overflix/sources-with-title',
+    language: 'Português'},
+  'Kayo': {url: 'https://api2.videasy.net/cuevana-spanish/sources-with-title, 
+    language: 'Spanish'},
+  'VisãoCine': {url: 'https://api.videasy.net/visioncine/sources-with-title',
+    language: 'Português'}
 };
 
 function requestRaw(method, urlString, options) {
