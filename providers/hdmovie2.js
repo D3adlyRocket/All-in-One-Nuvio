@@ -47,7 +47,7 @@ function searchSite(title, year) {
 
       while ((articleMatch = articleRegex.exec(html)) !== null) {
         var articleHtml = articleMatch[1]
-        var linkMatch = articleHtml.match(/href="(https:\/\/hdmovie2\.restaurant\/movies\/([^"\/]+)\/)"/)
+        var linkMatch = articleHtml.match(/href="(https:\/\/hdmovie2\.equipment\/movies\/([^"\/]+)\/)"/)
         if (!linkMatch) continue
         if (linkMatch[1].includes('/feed/')) continue
         var altMatch = articleHtml.match(/alt="([^"]+)"/)
