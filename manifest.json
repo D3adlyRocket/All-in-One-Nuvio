@@ -493,9 +493,9 @@
       "supportedTypes": ["movie", "tv"],
       "filename": "providers/toflix.js",
       "enabled": true,
-      "formats": ["mp4", "m3u8"]
+      "formats": ["mp4", "m3u8"],
       "logo": "https://i.postimg.cc/HkFFqm55/toflix.png",
-      "contentLanguage": ["en", "fr"],
+      "contentLanguage": ["en", "fr"]
     },
     {
       "id": "test",
