@@ -576,6 +576,19 @@
       "contentLanguage": ["en"]
     },
     {
+      "id": "vixsrc",
+      "name": "VixSrc",
+      "description": "VixSrc - The best place to watch movies and TV shows online for free. Stream in 1080p HD",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/vixsrc.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/1tHrBvzs/vixsrc.png",
+      "contentLanguage": ["en"]
+    },
+    {
       "id": "onlykdrama",
       "name": "OnlyKDrama",
       "description": "Asian Drama",
