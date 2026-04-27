@@ -189,7 +189,7 @@
     {
       "id": "dahmermovies",
       "name": "Dahmermovies",
-      "description": "Auto-generated description for Dahmermovies",
+      "description": "1080p Movies from Dahmermovies",
       "version": "1.0.0",
       "author": "Nuvio Team",
       "supportedTypes": ["movie", "tv"],
@@ -198,6 +198,19 @@
       "formats": ["mp4", "m3u8"],
       "logo": "https://i.postimg.cc/hGt3dV6Z/dhamermovies.png",
       "contentLanguage": ["en"] 
+    },
+    {
+      "id": "dahmermovies-4k",
+      "name": "Dahmermovies-4K",
+      "description": "4K & 1080p Movies",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/dahmermovies-4k.js",
+      "enabled": true,
+      "formats": ["mp4", "m3u8"],
+      "logo": "https://i.postimg.cc/hGt3dV6Z/dhamermovies.png",
+      "contentLanguage": ["en"]
     },
     {
       "id": "dooflix",
@@ -496,19 +509,6 @@
       "formats": ["mp4", "m3u8"],
       "logo": "https://i.postimg.cc/yNxJYqkv/toflix.png",
       "contentLanguage": ["en", "fr"]
-    },
-    {
-      "id": "test",
-      "name": "Test",
-      "description": "Direct links via StreamFlix API",
-      "version": "1.0.0",
-      "author": "Nuvio Team",
-      "supportedTypes": ["movie", "tv"],
-      "filename": "providers/test.js",
-      "enabled": true,
-      "formats": ["mp4", "m3u8"],
-      "logo": "",
-      "contentLanguage": ["en"]
     },
     {
       "id": "multivid",
