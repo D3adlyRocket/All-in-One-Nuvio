@@ -8,7 +8,7 @@ const TMDB_API_KEY = '1b3113663c9004682ed61086cf967c44';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 // Movies4u Configuration
-const MAIN_URL = "https://new1.movies4u.style";
+const MAIN_URL = "https://movies4u.promo";
 const M4UPLAY_BASE = "https://m4uplay.store";
 
 const HEADERS = {

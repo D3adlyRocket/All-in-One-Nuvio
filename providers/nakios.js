@@ -1,83 +1,55 @@
 // =============================================================
 // Provider Nuvio : Nakios (VF / VOSTFR / MULTI)
-// Version : 3.8.0
-// - Domaine récupéré automatiquement depuis domains.json (GitHub)
-// - Fallback sur nakios.fit si la lecture échoue
-// - URLs proxy → decodeURIComponent + domaine source comme Referer
+// Version : 3.9.1
+// - Bold Top Line: Nakios - Quality
+// - Sub-description: English Movie Title + Icons
 // =============================================================
 
+var TMDB_KEY = 'f3d757824f08ea2cff45eb8f47ca3a1e';
 var NAKIOS_UA       = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 var DOMAINS_URL     = 'https://raw.githubusercontent.com/wooodyhood/nuvio-repo/main/domains.json';
-var NAKIOS_FALLBACK = 'nakios.fit';
+var NAKIOS_FALLBACK = 'fit';
 
 var _cachedEndpoint = null;
+
+// ─── TMDB Helper: Get English Movie Name ─────────────────────
+
+function getEnglishTitle(tmdbId, type) {
+  var url = 'https://api.themoviedb.org/3/' + (type === 'tv' ? 'tv' : 'movie') + '/' + tmdbId + '?api_key=' + TMDB_KEY + '&language=en-US';
+  return fetch(url)
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      return data.title || data.name || "Nakios";
+    })
+    .catch(function() { return "Nakios"; });
+}
 
 // ─── Construction de l'endpoint ──────────────────────────────
 
 function buildEndpoint(tld) {
+  var baseDomain = tld.includes('nakios') ? tld : 'nakios.' + tld;
   return {
-    base:    'https://nakios.' + tld,
-    api:     'https://api.nakios.' + tld + '/api',
-    referer: 'https://nakios.' + tld + '/'
+    base:    'https://' + baseDomain,
+    api:     'https://api.' + baseDomain + '/api',
+    referer: 'https://' + baseDomain + '/'
   };
 }
 
-// ─── Récupération du domaine depuis GitHub ───────────────────
-
 function detectEndpoint() {
-  if (_cachedEndpoint) {
-    return Promise.resolve(_cachedEndpoint);
-  }
-
+  if (_cachedEndpoint) return Promise.resolve(_cachedEndpoint);
   return fetch(DOMAINS_URL)
-    .then(function(res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
-    })
+    .then(function(res) { return res.ok ? res.json() : Promise.reject(); })
     .then(function(data) {
-      var tld = data.nakios;
-      if (!tld) throw new Error('Domaine nakios absent du fichier');
-      console.log('[Nakios] Domaine récupéré: nakios.' + tld);
-      _cachedEndpoint = buildEndpoint(tld);
+      _cachedEndpoint = buildEndpoint(data.nakios || NAKIOS_FALLBACK);
       return _cachedEndpoint;
     })
-    .catch(function(err) {
-      console.warn('[Nakios] Lecture domains.json échouée (' + (err.message || err) + '), fallback: ' + NAKIOS_FALLBACK);
+    .catch(function() {
       _cachedEndpoint = buildEndpoint(NAKIOS_FALLBACK);
       return _cachedEndpoint;
     });
 }
 
-// ─── Fetch sources ───────────────────────────────────────────
-
-function fetchSources(endpoint, tmdbId, mediaType, season, episode) {
-  var url = mediaType === 'tv'
-    ? endpoint.api + '/sources/tv/' + tmdbId + '/' + (season || 1) + '/' + (episode || 1)
-    : endpoint.api + '/sources/movie/' + tmdbId;
-
-  console.log('[Nakios] Fetch: ' + url);
-
-  return fetch(url, {
-    method: 'GET',
-    headers: {
-      'User-Agent': NAKIOS_UA,
-      'Referer':    endpoint.referer,
-      'Origin':     endpoint.base
-    }
-  })
-    .then(function(res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
-    })
-    .then(function(data) {
-      if (!data || !data.success || !data.sources || data.sources.length === 0) {
-        throw new Error('Aucune source');
-      }
-      return data.sources;
-    });
-}
-
-// ─── Résolution des URLs ─────────────────────────────────────
+// ─── Logic ───────────────────────────────────────────────────
 
 function extractOrigin(url) {
   var m = url.match(/^(https?:\/\/[^\/]+)/);
@@ -86,66 +58,75 @@ function extractOrigin(url) {
 
 function resolveSource(source, endpoint) {
   var rawUrl = source.url || '';
-
-  // Cas 1 : URL directe (ex: cdn.fastflux.xyz → MP4)
   if (rawUrl.startsWith('http')) {
     return {
-      url:     rawUrl,
-      format:  (source.isM3U8 || rawUrl.indexOf('.m3u8') !== -1) ? 'm3u8' : 'mp4',
+      url: rawUrl,
+      format: (source.isM3U8 || rawUrl.indexOf('.m3u8') !== -1) ? 'm3u8' : 'mp4',
       referer: endpoint.referer,
-      origin:  endpoint.base
+      origin: endpoint.base
     };
   }
-
-  // Cas 2 : URL proxy relative → /api/sources/proxy?url=ENCODED&s=xxx
-  // Le proxy nakios retourne du HTML (protection serveur).
-  // Solution : décoder le paramètre url= pour obtenir l'URL directe
-  // (xalaflix, darkibox) et utiliser leur domaine comme Referer.
   if (rawUrl.charAt(0) === '/') {
     var urlMatch = rawUrl.match(/[?&]url=([^&]+)/);
     if (!urlMatch) return null;
-
     var decoded;
-    try { decoded = decodeURIComponent(urlMatch[1]); }
-    catch (e) { return null; }
-
-    if (!decoded || !decoded.startsWith('http')) return null;
-
+    try { decoded = decodeURIComponent(urlMatch[1]); } catch (e) { return null; }
     var origin = extractOrigin(decoded);
-    if (!origin) return null;
-
     return {
-      url:     decoded,
-      format:  'm3u8',
-      referer: origin + '/',
-      origin:  origin
+      url: decoded,
+      format: 'm3u8',
+      referer: origin ? origin + '/' : endpoint.referer,
+      origin: origin || endpoint.base
     };
   }
-
   return null;
 }
 
-// ─── Normalisation ───────────────────────────────────────────
+// ─── UI / Formatting ─────────────────────────────────────────
 
-function normalizeSources(sources, endpoint) {
+function normalizeSources(sources, endpoint, movieName) {
   var results = [];
-
   for (var i = 0; i < sources.length; i++) {
-    var source  = sources[i];
-    if (source.isEmbed) continue;
+    var s = sources[i];
+    if (s.isEmbed) continue;
 
-    var lang    = (source.lang    || 'MULTI').toUpperCase();
-    var quality = source.quality  || 'HD';
-    var name    = source.name     || 'Nakios';
-
-    var resolved = resolveSource(source, endpoint);
+    var resolved = resolveSource(s, endpoint);
     if (!resolved) continue;
 
-    console.log('[Nakios] +' + quality + ' ' + lang + ' ' + resolved.format + ' → ' + resolved.url.substring(0, 70));
+    // --- Metadata Preparation ---
+    var quality = s.quality || 'HD';
+    var rawLang = (s.lang || 'MULTI').toUpperCase();
+    var size    = s.size ? ' | 💾 ' + s.size : '';
+    var format  = resolved.format.toUpperCase();
+    
+    // Language Icons Priority Logic
+    var langIcon = '🇫🇷'; 
+    var langLabel = 'VF';
+
+    // MULTI Priority check
+    if (rawLang.indexOf('MULTI') !== -1 || (s.name && s.name.toUpperCase().indexOf('MULTI') !== -1)) {
+        langIcon = '🌍';
+        langLabel = 'MULTI';
+    } else if (rawLang.indexOf('VOST') !== -1) {
+        langIcon = '🔡';
+        langLabel = 'VOSTFR';
+    }
+
+    // --- Title Construction ---
+    // The "displayTitle" is the one that shows the Movie Name in the sub-line
+    var displayTitle = '🎬 ' + movieName + 
+                       ' | 📺 ' + quality + 
+                       ' | ' + langIcon + ' ' + langLabel + 
+                       ' | 🎞️ ' + format + 
+                       size;
 
     results.push({
-      name:    'Nakios',
-      title:   name + ' - ' + lang + ' ' + quality,
+      // THIS KEEPS THE TOP LINE BOLD AS "Nakios - 1080p"
+      name: 'Nakios - ' + quality, 
+      
+      // THIS SHOWS THE ENGLISH MOVIE NAME IN THE DESCRIPTION
+      title: displayTitle,
+      
       url:     resolved.url,
       quality: quality,
       format:  resolved.format,
@@ -156,35 +137,29 @@ function normalizeSources(sources, endpoint) {
       }
     });
   }
-
   return results;
 }
 
-// ─── Point d'entrée ──────────────────────────────────────────
+// ─── Entry Point ─────────────────────────────────────────────
 
 function getStreams(tmdbId, mediaType, season, episode) {
-  console.log('[Nakios] START tmdbId=' + tmdbId + ' type=' + mediaType + ' S' + season + 'E' + episode);
+  // We fetch the title here first so it's ready for the list below
+  return getEnglishTitle(tmdbId, mediaType).then(function(movieName) {
+    return detectEndpoint().then(function(endpoint) {
+      var url = mediaType === 'tv'
+        ? endpoint.api + '/sources/tv/' + tmdbId + '/' + (season || 1) + '/' + (episode || 1)
+        : endpoint.api + '/sources/movie/' + tmdbId;
 
-  return detectEndpoint()
-    .then(function(endpoint) {
-      return fetchSources(endpoint, tmdbId, mediaType, season, episode)
-        .then(function(sources) {
-          return normalizeSources(sources, endpoint);
-        })
-        .catch(function(err) {
-          console.warn('[Nakios] Endpoint ' + endpoint.base + ' KO, reset cache');
-          _cachedEndpoint = null;
-          throw err;
-        });
-    })
-    .then(function(results) {
-      console.log('[Nakios] ' + results.length + ' source(s) disponible(s)');
-      return results;
-    })
-    .catch(function(err) {
-      console.error('[Nakios] Erreur: ' + (err.message || String(err)));
-      return [];
+      return fetch(url, {
+        headers: { 'User-Agent': NAKIOS_UA, 'Referer': endpoint.referer }
+      })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (!data.success || !data.sources) return [];
+        return normalizeSources(data.sources, endpoint, movieName);
+      });
     });
+  }).catch(function() { return []; });
 }
 
 if (typeof module !== 'undefined' && module.exports) {

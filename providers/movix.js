@@ -1,10 +1,8 @@
 // =============================================================
 // Provider Nuvio : Movix (VF/VOSTFR français)
-// Version : 4.4.0
-// - Domaine récupéré automatiquement depuis domains.json (GitHub)
-// - Fallback sur movix.cash si la lecture échoue
-//   Triple API (purstream + cpasmal + fstream)
-//   + Darkino (Nightflix/darkibox) en bonus
+// Version : 4.4.1
+// - Added Columns: Resolution | Size | Language | Format | Extra
+// - Visual: Integrated Icons for all metadata
 // =============================================================
 
 var TMDB_KEY = 'f3d757824f08ea2cff45eb8f47ca3a1e';
@@ -13,13 +11,43 @@ var MOVIX_FALLBACK = 'cash';
 
 var _cachedEndpoint = null;
 
+// 1. Updated buildTitle with "Force Multi" logic
+function buildTitle(provider, res, lang, format, size, extra) {
+    var qIcon = (res.includes('2160') || res.includes('4K')) ? '💎' : '📺';
+    var lIcon = '🇫🇷'; // Default to VF
+    var displayLang = 'VF';
+
+    // Normalize everything to uppercase to compare
+    var check = (provider + " " + lang + " " + res).toUpperCase();
+
+    if (check.indexOf('MULTI') !== -1) {
+        lIcon = '🌍';
+        displayLang = 'MULTI';
+    } else if (check.indexOf('VOST') !== -1) {
+        lIcon = '🔡';
+        displayLang = 'VOSTFR';
+    } else {
+        lIcon = '🇫🇷';
+        displayLang = 'VF';
+    }
+
+    var columns = [
+        '🎬 ' + (provider.length > 20 ? provider.substring(0, 17) + "..." : provider),
+        qIcon + ' ' + res,
+        lIcon + ' ' + displayLang,
+        '🎞️ ' + (format || 'M3U8').toUpperCase()
+    ];
+
+    if (size) columns.push('💾 ' + size);
+    if (extra) columns.push('🛠️ ' + extra);
+
+    return columns.join(' | ');
+}
+
 // ─── Récupération du domaine depuis GitHub ───────────────────
 
 function detectApi() {
-  if (_cachedEndpoint) {
-    console.log('[Movix] Endpoint en cache: ' + _cachedEndpoint.api);
-    return Promise.resolve(_cachedEndpoint);
-  }
+  if (_cachedEndpoint) return Promise.resolve(_cachedEndpoint);
 
   return fetch(DOMAINS_URL)
     .then(function(res) {
@@ -29,7 +57,6 @@ function detectApi() {
     .then(function(data) {
       var tld = data.movix;
       if (!tld) throw new Error('Domaine movix absent du fichier');
-      console.log('[Movix] Domaine récupéré: movix.' + tld);
       _cachedEndpoint = {
         api:     'https://api.movix.' + tld,
         referer: 'https://movix.' + tld + '/'
@@ -37,7 +64,6 @@ function detectApi() {
       return _cachedEndpoint;
     })
     .catch(function(err) {
-      console.warn('[Movix] Lecture domains.json échouée (' + (err.message || err) + '), fallback: movix.' + MOVIX_FALLBACK);
       _cachedEndpoint = {
         api:     'https://api.movix.' + MOVIX_FALLBACK,
         referer: 'https://movix.' + MOVIX_FALLBACK + '/'
@@ -88,13 +114,12 @@ function resolveEmbed(embedUrl, referer) {
     .catch(function() { return null; });
 }
 
-// API 1 : Purstream — m3u8 direct
+// API 1 : Purstream
 function fetchPurstream(apiBase, referer, tmdbId, mediaType, season, episode) {
   var url = mediaType === 'tv'
     ? apiBase + '/api/purstream/tv/' + tmdbId + '/stream?season=' + (season || 1) + '&episode=' + (episode || 1)
     : apiBase + '/api/purstream/movie/' + tmdbId + '/stream';
 
-  console.log('[Movix] Purstream: ' + url);
   return fetch(url, {
     method: 'GET',
     headers: { 'Referer': referer, 'Origin': referer.replace(/\/$/, ''), 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -106,13 +131,12 @@ function fetchPurstream(apiBase, referer, tmdbId, mediaType, season, episode) {
     });
 }
 
-// API 2 : Cpasmal — voe, netu, doodstream, vidoza (VF/VOSTFR)
+// API 2 : Cpasmal
 function fetchCpasmal(apiBase, referer, tmdbId, mediaType, season, episode) {
   var url = mediaType === 'tv'
     ? apiBase + '/api/cpasmal/tv/' + tmdbId + '/' + (season || 1) + '/' + (episode || 1)
     : apiBase + '/api/cpasmal/movie/' + tmdbId;
 
-  console.log('[Movix] Cpasmal: ' + url);
   return fetch(url, {
     method: 'GET',
     headers: { 'Referer': referer, 'Origin': referer.replace(/\/$/, ''), 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -125,22 +149,20 @@ function fetchCpasmal(apiBase, referer, tmdbId, mediaType, season, episode) {
       langs.forEach(function(lang) {
         if (data.links[lang]) {
           data.links[lang].forEach(function(link) {
-            sources.push({ url: link.url, name: 'Movix ' + lang.toUpperCase(), player: link.server, lang: lang });
+            sources.push({ url: link.url, name: 'Movix', player: link.server, lang: lang });
           });
         }
       });
-      if (sources.length === 0) throw new Error('Aucune source');
       return sources;
     });
 }
 
-// API 3 : FStream — vidzy, fsvid, uqload (VF/VOSTFR)
+// API 3 : FStream
 function fetchFstream(apiBase, referer, tmdbId, mediaType, season, episode) {
   var url = mediaType === 'tv'
     ? apiBase + '/api/fstream/tv/' + tmdbId + '/season/' + (season || 1)
     : apiBase + '/api/fstream/movie/' + tmdbId;
 
-  console.log('[Movix] FStream: ' + url);
   return fetch(url, {
     method: 'GET',
     headers: { 'Referer': referer, 'Origin': referer.replace(/\/$/, ''), 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -155,16 +177,15 @@ function fetchFstream(apiBase, referer, tmdbId, mediaType, season, episode) {
       ['VF', 'VOSTFR'].forEach(function(lang) {
         if (episodeData.languages[lang]) {
           episodeData.languages[lang].forEach(function(source) {
-            sources.push({ url: source.url, name: 'Movix FStream ' + lang, player: source.player, lang: lang });
+            sources.push({ url: source.url, name: 'Movix', player: source.player, lang: lang });
           });
         }
       });
-      if (sources.length === 0) throw new Error('Aucune source');
       return sources;
     });
 }
 
-// API 4 : Darkino (Nightflix) — m3u8 directs haute qualité via darkibox
+// API 4 : Darkino
 function fetchDarkino(apiBase, referer, tmdbId, mediaType, season, episode) {
   var headers = {
     'Referer': referer,
@@ -178,7 +199,6 @@ function fetchDarkino(apiBase, referer, tmdbId, mediaType, season, episode) {
     .then(function(tmdb) {
       var title = tmdb.title || tmdb.name || tmdb.original_title || tmdb.original_name;
       if (!title) throw new Error('Titre TMDB introuvable');
-      console.log('[Movix] Darkino titre: "' + title + '"');
 
       return fetch(apiBase + '/api/search?title=' + encodeURIComponent(title), { method: 'GET', headers: headers })
         .then(function(res) { if (!res.ok) throw new Error('Search ' + res.status); return res.json(); })
@@ -194,7 +214,6 @@ function fetchDarkino(apiBase, referer, tmdbId, mediaType, season, episode) {
             }
           }
           if (!match) throw new Error('tmdb_id ' + tmdbId + ' non trouvé');
-          console.log('[Movix] Darkino ID interne: ' + match.id);
 
           var downloadUrl = apiBase + '/api/films/download/' + match.id;
           if (mediaType === 'tv' && season && episode) downloadUrl += '?season=' + season + '&episode=' + episode;
@@ -208,7 +227,7 @@ function fetchDarkino(apiBase, referer, tmdbId, mediaType, season, episode) {
                 .map(function(s) {
                   return {
                     name: 'Movix',
-                    title: 'Nightflix ' + (s.quality || 'HD') + ' - ' + (s.language || 'MULTI'),
+                    title: buildTitle('Nightflix', s.quality || 'HD', s.language || 'MULTI', 'm3u8', s.size || ''),
                     url: s.m3u8,
                     quality: s.quality || 'HD',
                     format: 'm3u8',
@@ -236,12 +255,13 @@ function processEmbedSources(sources, referer) {
   return Promise.all(supportedSources.slice(0, 8).map(function(source) {
     return resolveEmbed(source.url, referer).then(function(directUrl) {
       if (!directUrl || (!directUrl.match(/\.m3u8/i) && !directUrl.match(/\.mp4/i))) return null;
+      var fmt = directUrl.match(/\.mp4/i) ? 'mp4' : 'm3u8';
       return {
         name: 'Movix',
-        title: source.name + ' - ' + source.player,
+        title: buildTitle(source.name, 'HD', source.lang, fmt, '', source.player),
         url: directUrl,
         quality: 'HD',
-        format: directUrl.match(/\.mp4/i) ? 'mp4' : 'm3u8',
+        format: fmt,
         headers: { 'Referer': referer, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
       };
     });
@@ -249,17 +269,19 @@ function processEmbedSources(sources, referer) {
     return results.filter(function(r) { return r !== null; });
   });
 }
-
 function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode) {
   return fetchPurstream(apiBase, referer, tmdbId, mediaType, season, episode)
     .then(function(sources) {
       return Promise.all(sources.map(function(source) {
         return resolveRedirect(source.url, referer).then(function(resolvedUrl) {
+          var qual = source.name && source.name.indexOf('1080') !== -1 ? '1080p' : '720p';
+          
+          // CRITICAL FIX: Use source.name here so buildTitle can see "MULTI"
           return {
             name: 'Movix',
-            title: source.name || 'Movix VF',
+            title: buildTitle('Movix', qual, source.name, source.format || 'm3u8'), 
             url: resolvedUrl,
-            quality: source.name && source.name.indexOf('1080') !== -1 ? '1080p' : '720p',
+            quality: qual,
             format: source.format || 'm3u8',
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
           };
@@ -267,36 +289,52 @@ function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode) {
       }));
     })
     .catch(function() {
-      console.log('[Movix] Purstream vide, tentative Cpasmal + FStream + Darkino...');
+      // Fallback logic for other APIs...
       return Promise.all([
         fetchCpasmal(apiBase, referer, tmdbId, mediaType, season, episode).catch(function() { return []; }),
         fetchFstream(apiBase, referer, tmdbId, mediaType, season, episode).catch(function() { return []; }),
-        fetchDarkino(apiBase, referer, tmdbId, mediaType, season, episode).catch(function(e) {
-          console.log('[Movix] Darkino échec: ' + (e.message || e));
-          return [];
-        })
+        fetchDarkino(apiBase, referer, tmdbId, mediaType, season, episode).catch(function() { return []; })
       ]).then(function(results) {
         var embedSources = results[0].concat(results[1]);
         var darkinoSources = results[2];
         return processEmbedSources(embedSources, referer).then(function(resolved) {
-          var all = darkinoSources.concat(resolved);
-          if (all.length === 0) throw new Error('Aucune source');
-          return all;
+          return darkinoSources.concat(resolved);
         });
       });
     });
 }
-
+function getMovieTitle(tmdbId, type) {
+  var url = 'https://api.themoviedb.org/3/' + (type === 'tv' ? 'tv' : 'movie') + '/' + tmdbId + '?api_key=' + TMDB_KEY + '&language=en-US';
+  return fetch(url)
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      return data.title || data.name || "Movix"; // Fallback to Movix if name fails
+    })
+    .catch(function() { return "Movix"; });
+}
 function getStreams(tmdbId, mediaType, season, episode) {
-  console.log('[Movix] Fetching tmdbId=' + tmdbId + ' type=' + mediaType + ' S' + season + 'E' + episode);
+  console.log('[Movix] Fetching tmdbId=' + tmdbId);
 
-  return detectApi()
-    .then(function(endpoint) {
-      if (!endpoint) throw new Error('Détection endpoint échouée');
-      return tryFetchAll(endpoint.api, endpoint.referer, tmdbId, mediaType, season, episode);
+  // 1. Get the real Movie Name first
+  return getMovieTitle(tmdbId, mediaType)
+    .then(function(movieName) {
+      
+      // 2. Detect the API domain
+      return detectApi().then(function(endpoint) {
+        if (!endpoint) throw new Error('Détection endpoint échouée');
+        
+        // 3. Fetch all streams
+        return tryFetchAll(endpoint.api, endpoint.referer, tmdbId, mediaType, season, episode)
+          .then(function(streams) {
+            // 4. Replace "Movix" with the Movie Name in the titles
+            return streams.map(function(s) {
+              s.title = s.title.replace('Movix', movieName);
+              return s;
+            });
+          });
+      });
     })
     .catch(function(err) {
-      console.error('[Movix] Erreur globale:', err.message || err);
       return [];
     });
 }

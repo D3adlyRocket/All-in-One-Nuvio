@@ -241,7 +241,7 @@ function resolveIntermediateLink(initialUrl, refererUrl, quality) {
         const html = yield response.text();
         const $ = cheerio.load(html);
         const finalLinks = [];
-        $('.entry-content a[href*="driveseed.org"], .entry-content a[href*="tech.unblockedgames.world"], .entry-content a[href*="tech.creativeexpressionsblog.com"], .entry-content a[href*="tech.examzculture.in"]').each((i, el) => {
+        $('.entry-content a[href*="driveseed.org"], .entry-content a[href*="cloud.unblockedgames.world"], .entry-content a[href*="tech.creativeexpressionsblog.com"], .entry-content a[href*="tech.examzculture.in"]').each((i, el) => {
           const link = $(el).attr("href");
           const text = $(el).text().trim();
           if (link && text && !text.toLowerCase().includes("batch")) {
@@ -252,7 +252,7 @@ function resolveIntermediateLink(initialUrl, refererUrl, quality) {
           }
         });
         if (finalLinks.length === 0) {
-          $('a[href*="driveseed.org"], a[href*="tech.unblockedgames.world"], a[href*="tech.creativeexpressionsblog.com"], a[href*="tech.examzculture.in"]').each((i, el) => {
+          $('a[href*="driveseed.org"], a[href*="cloud.unblockedgames.world"], a[href*="tech.creativeexpressionsblog.com"], a[href*="tech.examzculture.in"]').each((i, el) => {
             const link = $(el).attr("href");
             const text = $(el).text().trim();
             if (link && text && !text.toLowerCase().includes("batch")) {
@@ -324,7 +324,7 @@ function resolveIntermediateLink(initialUrl, refererUrl, quality) {
           $("a").each((i, el) => {
             const link = $(el).attr("href");
             const text = $(el).text().trim();
-            if (link && (link.includes("driveseed.org") || link.includes("tech.unblockedgames.world") || link.includes("tech.examzculture.in") || link.includes("tech.creativeexpressionsblog.com") || link.includes("tech.examdegree.site"))) {
+            if (link && (link.includes("driveseed.org") || link.includes("cloud.unblockedgames.world") || link.includes("tech.examzculture.in") || link.includes("tech.creativeexpressionsblog.com") || link.includes("tech.examdegree.site"))) {
               console.log(`[MoviesMod] Found direct link: ${text} -> ${link}`);
               finalLinks.push({
                 server: text || "Download Link",
@@ -339,7 +339,7 @@ function resolveIntermediateLink(initialUrl, refererUrl, quality) {
             const $el = $(el);
             const link = $el.attr("href") || $el.attr("data-href") || $el.find("a").attr("href");
             const text = $el.text().trim();
-            if (link && (link.includes("driveseed.org") || link.includes("tech.unblockedgames.world") || link.includes("tech.examzculture.in") || link.includes("tech.creativeexpressionsblog.com") || link.includes("tech.examdegree.site"))) {
+            if (link && (link.includes("driveseed.org") || link.includes("cloud.unblockedgames.world") || link.includes("tech.examzculture.in") || link.includes("tech.creativeexpressionsblog.com") || link.includes("tech.examdegree.site"))) {
               console.log(`[MoviesMod] Found alternative link: ${text} -> ${link}`);
               finalLinks.push({
                 server: text || "Alternative Download",
@@ -629,7 +629,7 @@ function processDownloadLink(link, selectedResult, mediaType, episodeNum) {
       for (const targetLink of targetLinks) {
         try {
           let currentUrl = targetLink.url;
-          if (currentUrl && (currentUrl.includes("tech.unblockedgames.world") || currentUrl.includes("tech.creativeexpressionsblog.com") || currentUrl.includes("tech.examzculture.in") || currentUrl.includes("tech.examdegree.site"))) {
+          if (currentUrl && (currentUrl.includes("cloud.unblockedgames.world") || currentUrl.includes("tech.creativeexpressionsblog.com") || currentUrl.includes("tech.examzculture.in") || currentUrl.includes("tech.examdegree.site"))) {
             console.log(`[MoviesMod] Resolving SID link: ${targetLink.server}`);
             const resolvedUrl = yield resolveTechUnblockedLink(currentUrl);
             if (!resolvedUrl) {
@@ -817,7 +817,7 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
             let currentUrl = targetLink.url;
             const isEpisodeLink = targetLink.server && targetLink.server.toLowerCase().includes("episode");
             console.log(`[MoviesMod] Processing link: server="${targetLink.server}", isEpisodeLink=${isEpisodeLink}, url=${targetLink.url.substring(0, 50)}...`);
-            if (currentUrl.includes("tech.unblockedgames.world") || currentUrl.includes("tech.creativeexpressionsblog.com") || currentUrl.includes("tech.examzculture.in")) {
+            if (currentUrl.includes("cloud.unblockedgames.world") || currentUrl.includes("tech.creativeexpressionsblog.com") || currentUrl.includes("tech.examzculture.in")) {
               const resolvedUrl = yield resolveTechUnblockedLink(currentUrl);
               if (!resolvedUrl)
                 continue;

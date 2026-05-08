@@ -421,6 +421,19 @@
       ]
     },
     {
+      "id": "gramcinema",
+      "name": "GramCinema",
+      "description": "Premium 4K & 1080p multilingual streams",
+      "version": "1.0.0",
+      "author": "MultiSource",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/gramcinema.js",
+      "enabled": true,
+      "formats": ["mp4", "mkv"],
+      "logo": "https://i.postimg.cc/WbNPW7Jv/gramcinema.png",
+      "contentLanguage": ["en", "hi", "ta", "te"]
+    },
+    {
       "id": "fmovies",
       "name": "FMovies+",
       "description": "Hindi Dubbed Movies/Series",
@@ -690,7 +703,7 @@
       "id": "nakios",
       "name": "Nakios",
       "description": "Mainly French, Some English & 4K Quality",
-      "version": "1.0.0",
+      "version": "3.8.2",
       "author": "Wooodyhood",
       "supportedTypes": [
         "movie",
@@ -725,9 +738,33 @@
         "m3u8"
       ],
       "logo": "https://i.postimg.cc/L64M3bYV/netmirror.png",
-      "contentLanguage": [
-        "en"
-      ]
+      "contentLanguage": ["en"]
+    },
+    {
+      "id": "playimdb",
+      "name": "PlayIMDb (Movies)",
+      "description": "High-Speed Direct Streaming for Movies (IMDb ID Extract)",
+      "version": "1.1.4",
+      "author": "Mukesh",
+      "supportedTypes": ["movie"],
+      "filename": "providers/playimdb.js",
+      "enabled": true,
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "https://i.postimg.cc/KzjPtYWY/imdb.png",
+      "contentLanguage": ["en", "hi"]
+    },
+    { 
+      "id": "playimdb_series",
+      "name": "PlayIMDb (Series)",
+      "description": "High-Speed Direct Streaming for TV Shows (StreamIMDb Extract)",
+      "version": "1.2.1",
+      "author": "Mukesh",
+      "supportedTypes": ["tv"],
+      "filename": "providers/playimdb_v2.js",
+      "enabled": true,
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "https://i.postimg.cc/KzjPtYWY/imdb.png",
+      "contentLanguage": ["en", "hi"]
     },
     {
       "id": "purstream",
@@ -1000,18 +1037,9 @@
       ],
       "filename": "providers/onetouchtv.js",
       "enabled": true,
-      "formats": [
-        "mp4",
-        "mkv",
-        "m3u8"
-      ],
-      "logo": "https://i.postimg.cc/dtX84Gqc/onlykdrama.jpg",
-      "contentLanguage": [
-        "en",
-        "ko",
-        "ja",
-        "zh"
-      ]
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "https://i.postimg.cc/PNns1nRL/onetouchtv.png",
+      "contentLanguage": ["en", "ko", "ja", "zh"]
     },
     {
       "id": "kisskh",
