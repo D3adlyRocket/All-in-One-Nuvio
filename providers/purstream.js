@@ -1,8 +1,9 @@
 // =============================================================
 // Provider Nuvio : Purstream.art (VF/VOSTFR/MULTI)
-// Version : 4.0.0
-// - Bold Top Line: Purstream - Quality
-// - Sub-description: S[X] E[X] - Episode Name | English Title | Icons
+// Version : 4.1.0
+// - Header: Purstream - Quality
+// - Line 1: 🎬 Movie Name - Year (or S/E info)
+// - Line 2: 📺 Res | 🌍 Lang | 💾 Size | 🎞️ Format | ⏱️ Duration
 // =============================================================
 
 var DOMAINS_URL           = 'https://raw.githubusercontent.com/wooodyhood/nuvio-repo/main/domains.json';
@@ -14,32 +15,31 @@ var TMDB_KEY              = 'f3d757824f08ea2cff45eb8f47ca3a1e';
 
 var _cachedEndpoint = null;
 
-// ─── TMDB Helpers ───────────────────────────────────────────
+// ─── TMDB Helpers (Updated for Duration/Year) ────────────────
 
-function getEnglishTitle(tmdbId, type) {
+function getTmdbDetails(tmdbId, type) {
   var url = 'https://api.themoviedb.org/3/' + (type === 'tv' ? 'tv' : 'movie') + '/' + tmdbId + '?api_key=' + TMDB_KEY + '&language=en-US';
-  return fetch(url)
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-      return data.title || data.name || "Purstream";
-    })
-    .catch(function() { return "Purstream"; });
+  return fetch(url).then(function(res) { return res.json(); }).then(function(data) {
+      var date = data.release_date || data.first_air_date || "";
+      return {
+        enName: data.title || data.name || "Purstream",
+        year: date ? date.split('-')[0] : "",
+        duration: (type === 'movie' && data.runtime) ? data.runtime + ' min' : (type === 'tv' && data.episode_run_time && data.episode_run_time.length > 0 ? data.episode_run_time[0] + ' min' : "")
+      };
+  }).catch(function() { return { enName: "Purstream", year: "", duration: "" }; });
 }
 
-function getEpisodeName(tmdbId, season, episode) {
+function getEpisodeInfo(tmdbId, season, episode) {
   if (!tmdbId || !season || !episode) return Promise.resolve(null);
   var url = 'https://api.themoviedb.org/3/tv/' + tmdbId + '/season/' + season + '/episode/' + episode + '?api_key=' + TMDB_KEY + '&language=en-US';
-  return fetch(url)
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-      return data.name || null;
-    })
-    .catch(function() { return null; });
+  return fetch(url).then(function(res) { return res.json(); }).then(function(data) {
+      return { name: data.name || null, duration: data.runtime ? data.runtime + ' min' : null };
+  }).catch(function() { return null; });
 }
 
-// ─── UI Helper: Title Builder ────────────────────────────────
+// ─── UI Helper: Two-Line Title Builder ───────────────────────
 
-function buildPurstreamTitle(movieName, res, lang, format, season, episode, epName) {
+function buildPurstreamTitle(meta, res, lang, format, season, episode, epInfo) {
     var qIcon = (res.includes('2160') || res.includes('4K')) ? '💎' : '📺';
     var lIcon = '🇫🇷';
     var displayLang = 'VF';
@@ -53,29 +53,28 @@ function buildPurstreamTitle(movieName, res, lang, format, season, episode, epNa
         displayLang = 'VOSTFR';
     }
 
-    // Season/Episode + Episode Name Logic
-    var seInfo = "";
+    // Line 1: Identity
+    var line1 = '🎬 ';
     if (season && episode) {
-        seInfo = 'S' + season + ' E' + episode;
-        if (epName) {
-            seInfo += ' - ' + epName; 
-        }
-        seInfo += ' | ';
+        line1 += 'S' + season + ' E' + episode + (epInfo && epInfo.name ? ' - ' + epInfo.name : '') + ' | ' + meta.enName;
+    } else {
+        line1 += meta.enName + (meta.year ? ' - ' + meta.year : '');
     }
-    
-    var cleanName = movieName.length > 18 ? movieName.substring(0, 16) + ".." : movieName;
 
+    // Line 2: Technical Specs
     var columns = [
-        '🎬 ' + seInfo + cleanName,
         qIcon + ' ' + res,
         lIcon + ' ' + displayLang,
         '🎞️ ' + (format || 'M3U8').toUpperCase()
     ];
 
-    return columns.join(' | ');
+    var finalDur = (epInfo && epInfo.duration) ? epInfo.duration : meta.duration;
+    if (finalDur) columns.push('⏱️ ' + finalDur);
+
+    return line1 + '\n' + columns.join(' | ');
 }
 
-// ─── API & Domain Logic ──────────────────────────────────────
+// ─── API & Domain Logic (Untouched) ──────────────────────────
 
 function detectPurstreamDomain() {
   if (_cachedEndpoint) return Promise.resolve(_cachedEndpoint);
@@ -107,7 +106,7 @@ function extractYear(dateStr) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-function getTmdbMetadata(tmdbId, mediaType) {
+function getTmdbSearchMeta(tmdbId, mediaType) {
   var type = mediaType === 'tv' ? 'tv' : 'movie';
   var url = 'https://api.themoviedb.org/3/' + type + '/' + tmdbId + '?language=fr-FR&api_key=' + TMDB_KEY;
   return fetch(url).then(function(res) { return res.json(); }).then(function(data) {
@@ -119,7 +118,7 @@ function getTmdbMetadata(tmdbId, mediaType) {
 
 function findPurstreamIdByTitle(title, mediaType, tmdbYear) {
   var encoded = encodeURIComponent(title);
-  return fetch(PURSTREAM_API + '/search-bar/search/' + encoded, { headers: { 'User-Agent': PURSTREAM_UA, 'Referer': PURSTREAM_REFERER, 'Origin': 'https://purstream.art' } })
+  return fetch(PURSTREAM_API + '/search-bar/search/' + encoded, { headers: { 'User-Agent': PURSTREAM_UA, 'Referer': PURSTREAM_REFERER } })
     .then(function(res) { return res.json(); })
     .then(function(data) {
       var items = data.data.items.movies && data.data.items.movies.items ? data.data.items.movies.items : [];
@@ -160,13 +159,13 @@ function parseQuality(name) {
   return 'HD';
 }
 
-function normalizeMovieSources(urls, englishName) {
+function normalizeMovieSources(urls, meta) {
   return urls.filter(function(item) { return item.url && (item.url.match(/\.m3u8/i) || item.url.match(/\.mp4/i)); })
     .map(function(item) {
       var q = parseQuality(item.name);
       return {
         name: 'Purstream - ' + q,
-        title: buildPurstreamTitle(englishName, q, parseLang(item.name), item.url.match(/\.mp4/i) ? 'mp4' : 'm3u8', null, null, null),
+        title: buildPurstreamTitle(meta, q, parseLang(item.name), item.url.match(/\.mp4/i) ? 'mp4' : 'm3u8', null, null, null),
         url: item.url,
         quality: q,
         format: item.url.match(/\.mp4/i) ? 'mp4' : 'm3u8',
@@ -175,12 +174,12 @@ function normalizeMovieSources(urls, englishName) {
     });
 }
 
-function normalizeEpisodeSources(sources, englishName, season, episode, epName) {
+function normalizeEpisodeSources(sources, meta, season, episode, epInfo) {
   return sources.map(function(item) {
     var q = parseQuality(item.source_name);
     return {
       name: 'Purstream - ' + q,
-      title: buildPurstreamTitle(englishName, q, parseLang(item.source_name), item.format || 'm3u8', season, episode, epName),
+      title: buildPurstreamTitle(meta, q, parseLang(item.source_name), item.format || 'm3u8', season, episode, epInfo),
       url: item.stream_url,
       quality: q,
       format: item.format || 'm3u8',
@@ -193,27 +192,27 @@ function normalizeEpisodeSources(sources, englishName, season, episode, epName) 
 
 function getStreams(tmdbId, mediaType, season, episode) {
   return Promise.all([
-    getEnglishTitle(tmdbId, mediaType),
-    mediaType === 'tv' ? getEpisodeName(tmdbId, season, episode) : Promise.resolve(null),
+    getTmdbDetails(tmdbId, mediaType),
+    mediaType === 'tv' ? getEpisodeInfo(tmdbId, season, episode) : Promise.resolve(null),
     detectPurstreamDomain(),
-    getTmdbMetadata(tmdbId, mediaType)
+    getTmdbSearchMeta(tmdbId, mediaType)
   ]).then(function(results) {
-    var englishName = results[0];
-    var epName      = results[1];
-    var endpoint    = results[2];
-    var meta        = results[3];
+    var meta      = results[0]; // enName, year, duration
+    var epInfo    = results[1]; // name, duration
+    var endpoint  = results[2];
+    var search    = results[3]; // fr title for search
     applyPurstreamDomain(endpoint);
 
-    return findPurstreamIdByTitle(meta.fr, mediaType, meta.year)
-      .catch(function() { return findPurstreamIdByTitle(meta.orig, mediaType, meta.year); })
+    return findPurstreamIdByTitle(search.fr, mediaType, search.year)
+      .catch(function() { return findPurstreamIdByTitle(search.orig, mediaType, search.year); })
       .then(function(purstreamId) {
         if (mediaType === 'tv') {
           return fetchEpisodeSources(purstreamId, season, episode).then(function(s) { 
-              return normalizeEpisodeSources(s, englishName, season, episode, epName); 
+              return normalizeEpisodeSources(s, meta, season, episode, epInfo); 
           });
         } else {
           return fetchMovieSources(purstreamId).then(function(u) { 
-              return normalizeMovieSources(u, englishName); 
+              return normalizeMovieSources(u, meta); 
           });
         }
       });

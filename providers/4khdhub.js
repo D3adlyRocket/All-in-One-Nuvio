@@ -76,7 +76,7 @@ var import_cheerio_without_node_native2 = __toESM(require("cheerio-without-node-
 // src/4KHDHub/http.js
 var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
-var DEFAULT_MAIN_URL = "https://4khdhub.dad";
+var DEFAULT_MAIN_URL = "https://4khdhub.link";
 
 // AMENDED: Modernized User-Agent and headers to prevent mobile blocking
 var HEADERS = {

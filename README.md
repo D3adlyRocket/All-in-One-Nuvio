@@ -83,6 +83,7 @@ A masive shoutout to all the developers who have created these plugins.
 - **Abinanthankv**
 - **KennethJYS**
 - **Real-Morpheus**
+- **Xyr0nX/Antonio**
 
 ---
 

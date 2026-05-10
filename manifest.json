@@ -401,26 +401,6 @@
       ]
     },
     {
-      "id": "flixindia",
-      "name": "FlixIndia",
-      "description": "Streaming provider for FlixIndia",
-      "version": "1.0.0",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "filename": "providers/flixindia.js",
-      "enabled": true,
-      "formats": [
-        "mkv"
-      ],
-      "logo": "https://i.postimg.cc/4xSPpSbb/onepieceskull.png",
-      "contentLanguage": [
-        "en",
-        "hi"
-      ]
-    },
-    {
       "id": "netmirrortest",
       "name": "NetMirrorTest",
       "description": "1080p multilingual streams",

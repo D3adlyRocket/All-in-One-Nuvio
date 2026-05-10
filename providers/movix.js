@@ -1,8 +1,8 @@
 // =============================================================
 // Provider Nuvio : Movix (VF/VOSTFR français)
-// Version : 4.5.0
-// - Added: S[X] E[X] - Episode Name support
-// - Visual: Integrated Icons and ToFlix-style formatting
+// Version : 4.6.0
+// - Added: ⏱️ Duration & Movie Year support
+// - Layout: Header (Bold) | Line 1 (Identity) | Line 2 (Specs)
 // =============================================================
 
 var TMDB_KEY = 'f3d757824f08ea2cff45eb8f47ca3a1e';
@@ -11,37 +11,45 @@ var MOVIX_FALLBACK = 'cash';
 
 var _cachedEndpoint = null;
 
-// ─── TMDB Helpers ───────────────────────────────────────────
+// ─── TMDB Helpers (Updated for Year & Duration) ──────────────
 
-function getMovieTitle(tmdbId, type) {
+function getTmdbMetadata(tmdbId, type) {
     var url = 'https://api.themoviedb.org/3/' + (type === 'tv' ? 'tv' : 'movie') + '/' + tmdbId + '?api_key=' + TMDB_KEY + '&language=en-US';
     return fetch(url)
         .then(function(res) { return res.json(); })
         .then(function(data) {
-            return data.title || data.name || "Movix";
+            var date = data.release_date || data.first_air_date || "";
+            return {
+                name: data.title || data.name || "Movix",
+                year: date ? date.split('-')[0] : "",
+                duration: (type === 'movie' && data.runtime) ? data.runtime + ' min' : (type === 'tv' && data.episode_run_time && data.episode_run_time.length > 0 ? data.episode_run_time[0] + ' min' : "")
+            };
         })
-        .catch(function() { return "Movix"; });
+        .catch(function() { return { name: "Movix", year: "", duration: "" }; });
 }
 
-function getEpisodeName(tmdbId, season, episode) {
+function getEpisodeInfo(tmdbId, season, episode) {
     if (!tmdbId || !season || !episode) return Promise.resolve(null);
     var url = 'https://api.themoviedb.org/3/tv/' + tmdbId + '/season/' + season + '/episode/' + episode + '?api_key=' + TMDB_KEY + '&language=en-US';
     return fetch(url)
         .then(function(res) { return res.json(); })
         .then(function(data) {
-            return data.name || null;
+            return {
+                name: data.name || null,
+                duration: data.runtime ? data.runtime + ' min' : null
+            };
         })
         .catch(function() { return null; });
 }
 
-// ─── UI / Formatting ─────────────────────────────────────────
+// ─── UI / Formatting (Updated for 2-Line Layout) ─────────────
 
-function buildTitle(provider, res, lang, format, size, extra, season, episode, epName) {
+function buildTitle(meta, res, lang, format, size, extra, season, episode, epInfo) {
     var qIcon = (res.includes('2160') || res.includes('4K')) ? '💎' : '📺';
     var lIcon = '🇫🇷';
     var displayLang = 'VF';
 
-    var check = (provider + " " + lang + " " + res).toUpperCase();
+    var check = (lang + " " + res).toUpperCase();
     if (check.indexOf('MULTI') !== -1) {
         lIcon = '🌍';
         displayLang = 'MULTI';
@@ -50,19 +58,16 @@ function buildTitle(provider, res, lang, format, size, extra, season, episode, e
         displayLang = 'VOSTFR';
     }
 
-    // Season/Episode Logic
-    var sePrefix = "";
+    // --- Line 1: Identity ---
+    var line1 = '🎬 ';
     if (season && episode) {
-        sePrefix = 'S' + season + ' E' + episode;
-        if (epName) sePrefix += ' - ' + epName;
-        sePrefix += ' | ';
+        line1 += 'S' + season + ' E' + episode + (epInfo && epInfo.name ? ' - ' + epInfo.name : '') + ' | ' + meta.name;
+    } else {
+        line1 += meta.name + (meta.year ? ' - ' + meta.year : '');
     }
 
-    // Clean Provider Name (Movie Title)
-    var cleanName = provider.length > 25 ? provider.substring(0, 22) + "..." : provider;
-
+    // --- Line 2: Technical Specs ---
     var columns = [
-        '🎬 ' + sePrefix + cleanName,
         qIcon + ' ' + res,
         lIcon + ' ' + displayLang,
         '🎞️ ' + (format || 'M3U8').toUpperCase()
@@ -71,10 +76,14 @@ function buildTitle(provider, res, lang, format, size, extra, season, episode, e
     if (size) columns.push('💾 ' + size);
     if (extra) columns.push('🛠️ ' + extra);
 
-    return columns.join(' | ');
+    // Duration Logic
+    var finalDur = (epInfo && epInfo.duration) ? epInfo.duration : meta.duration;
+    if (finalDur) columns.push('⏱️ ' + finalDur);
+
+    return line1 + '\n' + columns.join(' | ');
 }
 
-// ─── Network Logic ───────────────────────────────────────────
+// ─── Network Logic (Untouched) ───────────────────────────────
 
 function detectApi() {
     if (_cachedEndpoint) return Promise.resolve(_cachedEndpoint);
@@ -127,7 +136,7 @@ function fetchCpasmal(apiBase, referer, tmdbId, mediaType, season, episode) {
 
 // ─── Processing ──────────────────────────────────────────────
 
-function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode, movieName, epName) {
+function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode, meta, epInfo) {
     return fetchPurstream(apiBase, referer, tmdbId, mediaType, season, episode)
         .then(function(sources) {
             return Promise.all(sources.map(function(source) {
@@ -135,7 +144,7 @@ function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode, movie
                     var qual = (source.name || "").indexOf('1080') !== -1 ? '1080p' : '720p';
                     return {
                         name: 'Movix - ' + qual,
-                        title: buildTitle(movieName, qual, source.name, source.format || 'm3u8', null, null, season, episode, epName),
+                        title: buildTitle(meta, qual, source.name, source.format || 'm3u8', null, null, season, episode, epInfo),
                         url: resolvedUrl,
                         quality: qual,
                         format: source.format || 'm3u8',
@@ -151,7 +160,7 @@ function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode, movie
                         if (!directUrl) return null;
                         return {
                             name: 'Movix - HD',
-                            title: buildTitle(movieName, 'HD', s.lang, 'm3u8', '', s.player, season, episode, epName),
+                            title: buildTitle(meta, 'HD', s.lang, 'm3u8', '', s.player, season, episode, epInfo),
                             url: directUrl,
                             quality: 'HD',
                             format: 'm3u8',
@@ -167,15 +176,15 @@ function tryFetchAll(apiBase, referer, tmdbId, mediaType, season, episode, movie
 
 function getStreams(tmdbId, mediaType, season, episode) {
     return Promise.all([
-        getMovieTitle(tmdbId, mediaType),
-        mediaType === 'tv' ? getEpisodeName(tmdbId, season, episode) : Promise.resolve(null),
+        getTmdbMetadata(tmdbId, mediaType),
+        mediaType === 'tv' ? getEpisodeInfo(tmdbId, season, episode) : Promise.resolve(null),
         detectApi()
     ]).then(function(results) {
-        var movieName = results[0];
-        var epName = results[1];
+        var meta = results[0];
+        var epInfo = results[1];
         var endpoint = results[2];
 
-        return tryFetchAll(endpoint.api, endpoint.referer, tmdbId, mediaType, season, episode, movieName, epName);
+        return tryFetchAll(endpoint.api, endpoint.referer, tmdbId, mediaType, season, episode, meta, epInfo);
     }).catch(function() { return []; });
 }
 
