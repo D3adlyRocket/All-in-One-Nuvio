@@ -330,6 +330,20 @@
       "contentLanguage": ["en", "es"]
     },
     {
+      "id": "lordflix",
+      "name": "Lordflix",
+      "description": "Cascading multi-proxy decryption stream provider.",
+      "version": "1.0.0",
+      "author": "dustincos",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/lordflix.js",
+      "enabled": true,
+      "formats": ["m3u8"],
+      "logo": "https://i.postimg.cc/vZgHT15q/lordflix.png",
+      "contentLanguage": ["en"],
+      "limited": false
+    },
+    {
       "id": "moviebox",
       "name": "MovieBox",
       "description": "MovieBox - Hindi, Tamil, Telugu & English Movies/Series with multi-quality streams",
