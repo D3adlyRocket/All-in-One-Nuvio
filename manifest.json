@@ -257,6 +257,20 @@
       "contentLanguage": ["en", "hi", "ar"]
     },
     {
+      "id": "ctgmovies",
+      "name": "CTGMovies",
+      "description": "English | Hindi Movies",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/ctgmovies.js",
+      "enabled": true,
+      "hasSettings": false,
+      "formats": ["m3u8", "mp4", "mkv"],
+      "logo": "https://i.postimg.cc/jSQmk9B3/ctgmovies.png",
+      "contentLanguage": ["en", "hi"]
+    },
+    {
       "id": "dahmermovies",
       "name": "Dahmermovies",
       "description": "1080p Movies from Dahmermovies",
@@ -397,34 +411,6 @@
       "contentLanguage": ["en", "hi"]
     },
     {
-      "id": "hdmovie2",
-      "name": "🎬 HDMovie2",
-      "description": "Bollywood & Hindi Dubbed Movies",
-      "version": "1.0.0",
-      "author": "piratezoro9",
-      "supportedTypes": ["movie"],
-      "filename": "providers/hdmovie2.js",
-      "enabled": true,
-      "hasSettings": true,
-      "formats": ["m3u8"],
-      "logo": "https://i.postimg.cc/bJnfnzHS/hdmovie2.png",
-      "contentLanguage": ["hi", "en"]
-    },
-    {
-      "id": "ctgmovies",
-      "name": "CTGMovies",
-      "description": "English | Hindi Movies",
-      "version": "1.0.0",
-      "author": "Nuvio Team",
-      "supportedTypes": ["movie", "tv"],
-      "filename": "providers/ctgmovies.js",
-      "enabled": true,
-      "hasSettings": false,
-      "formats": ["m3u8", "mp4", "mkv"],
-      "logo": "https://i.postimg.cc/jSQmk9B3/ctgmovies.png",
-      "contentLanguage": ["en", "hi"]
-    },
-    {
       "id": "kurage",
       "name": "Kurage",
       "description": "Kurage.live anime streaming with tRPC API and multi-server proxy support",
@@ -495,6 +481,20 @@
       "formats": ["mp4", "mkv", "m3u8"],
       "logo": "https://i.postimg.cc/bwDbhq9q/moviesdrive.png",
       "contentLanguage": ["en", "hi"]
+    },
+    {
+      "id": "movieshunt",
+      "name": "🎬 MoviesHunt",
+      "description": "Hollywood & Bollywood Movies in Multi Language",
+      "version": "1.0.0",
+      "author": "piratezoro9",
+      "supportedTypes": ["movie"],
+      "filename": "providers/movieshunt.js",
+      "enabled": true,
+      "hasSettings": false,
+      "formats": ["m3u8"],
+      "logo": "https://i.postimg.cc/3Rc34LJj/movieshunt.png",
+      "contentLanguage": ["hi", "en"]
     },
     {
       "id": "moviesmod",
