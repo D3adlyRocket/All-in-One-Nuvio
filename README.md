@@ -11,7 +11,7 @@ A collection of streaming providers for the Nuvio app. Providers are JavaScript 
 1. Open **Nuvio** > **Settings** > **Plugins**
 2. Add this repository URL:
    ```
-   https://raw.githubusercontent.com/tapframe/nuvio-providers/refs/heads/main
+   https://raw.githubusercontent.com/D3adlyRocket/All-in-One-Nuvio/refs/heads/dev
    ```
 3. Refresh and enable the providers you want
 
@@ -20,7 +20,7 @@ A collection of streaming providers for the Nuvio app. Providers are JavaScript 
 ## Project Structure
 
 ```
-nuvio-providers/
+All-in-One-Nuvio/
 ├── src/                    # Source files (multi-file development)
 │   ├── vixsrc/
 │   │   ├── index.js        # Main entry point

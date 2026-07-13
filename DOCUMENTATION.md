@@ -60,8 +60,8 @@ Nuvio providers operate in a specific environment:
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/tapframe/nuvio-providers.git
-   cd nuvio-providers
+   git clone -b dev https://github.com/D3adlyRocket/All-in-One-Nuvio.git
+   cd All-in-One-Nuvio
    ```
 
 2. **Install Tools**
