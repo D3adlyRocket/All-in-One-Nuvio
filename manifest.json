@@ -426,18 +426,18 @@
       "contentLanguage": ["en", "ja"]
     },
     {
-      "id": "lordflix",
-      "name": "Lordflix",
-      "description": "Cascading multi-proxy decryption stream provider.",
+      "id": "hdghartv",
+      "name": "HDGharTV",
+      "description": "HDGhar TV allows users to watch movies, TV shows and web series in English & Hindi.",
       "version": "1.0.0",
-      "author": "dustincos",
+      "author": "Nuvio Team",
       "supportedTypes": ["movie", "tv"],
-      "filename": "providers/lordflix.js",
+      "filename": "providers/hdghartv.js",
       "enabled": true,
-      "hasSettings": true,
+      "hasSettings": false,
       "formats": ["m3u8"],
-      "logo": "https://i.postimg.cc/vZgHT15q/lordflix.png",
-      "contentLanguage": ["en"],
+      "logo": "https://i.postimg.cc/761WVpJS/hdghartv.png",
+      "contentLanguage": ["en", "hi"],
       "limited": false
     },
     {
