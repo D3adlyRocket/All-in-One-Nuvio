@@ -187,6 +187,20 @@
       "contentLanguage": ["en", "hi", "ta", "te"]
     },
     {
+      "id": "bollyflix",
+      "name": "BollyFlix",
+      "description": "Bollywood, Hollywood, and South Indian movies, in Dual Language",
+      "version": "1.0.0",
+      "author": "Nuvio Team",
+      "supportedTypes": ["movie", "tv"],
+      "filename": "providers/bollyflix.js",
+      "enabled": true,
+      "hasSettings": false,
+      "formats": ["mp4", "mkv", "m3u8"],
+      "logo": "",
+      "contentLanguage": ["en", "hi"]
+    },
+    {
       "id": "castle",
       "name": "🏰 Castle",
       "description": "Multi Lang provider",
@@ -831,20 +845,6 @@
       "formats": ["mp4", "mkv", "m3u8"],
       "logo": "https://i.postimg.cc/dtX84Gqc/onlykdrama.jpg",
       "contentLanguage": ["ko"]
-    },
-    {
-      "id": "onetouchtv",
-      "name": "OneTouchTV",
-      "description": "Watch Asian Drama & Anime",
-      "version": "1.0.0",
-      "author": "Kabir",
-      "supportedTypes": ["movie", "tv"],
-      "filename": "providers/onetouchtv.js",
-      "enabled": true,
-      "hasSettings": true,
-      "formats": ["mp4", "mkv", "m3u8"],
-      "logo": "https://i.postimg.cc/PNns1nRL/onetouchtv.png",
-      "contentLanguage": ["en", "ko", "ja", "zh"]
     },
     {
       "id": "kisskh",
