@@ -1,6 +1,6 @@
 /**
  * cinemacity - Built from src/cinemacity/
- * Generated: 2026-06-29T06:58:11.325Z
+ * Generated: 2026-07-20T14:03:24.965Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -118,117 +118,115 @@ function extractQuality(url) {
 }
 var abc = "ABCDEFGHIJKLMabcdefghijklmNOPQRSTUVWXYZnopqrstuvwxyz";
 var keyStr = abc + "0123456789+/=";
-var sugar = (x) => {
-  if (!x)
-    return "";
-  const dechar = String.fromCharCode;
-  const parts = x.split(dechar(61));
-  let result = "";
-  const c1 = dechar(120);
-  for (const part of parts) {
-    let encoded = "";
-    for (const char of part) {
-      encoded += char === c1 ? dechar(49) : dechar(48);
-    }
-    if (encoded) {
-      const chr = parseInt(encoded, 2);
-      result += dechar(chr);
-    }
-  }
-  return result.substring(0, result.length - 1);
-};
-var pepper = (s, n, yVal) => {
-  s = s.replace(/\+/g, "#").replace(/#/g, "+");
-  let a = parseInt(sugar(yVal), 10) * n;
-  if (n < 0)
-    a += abc.length / 2;
-  const r = abc.substring(a * 2) + abc.substring(0, a * 2);
-  return s.replace(/[A-Za-z]/g, (c) => {
-    return r.charAt(abc.indexOf(c));
-  });
-};
-var saltD = (e) => {
-  const dechar = String.fromCharCode;
-  let t = "";
-  let n, r, i;
-  let s, o, u, a;
-  let f = 0;
-  e = e.replace(/[^A-Za-z0-9\+\/\=]/g, "");
-  while (f < e.length) {
-    s = keyStr.indexOf(e.charAt(f++));
-    o = keyStr.indexOf(e.charAt(f++));
-    u = keyStr.indexOf(e.charAt(f++));
-    a = keyStr.indexOf(e.charAt(f++));
-    n = s << 2 | o >> 4;
-    r = (o & 15) << 4 | u >> 2;
-    i = (u & 3) << 6 | a;
-    t = t + dechar(n);
-    if (u !== 64) {
-      t = t + dechar(r);
-    }
-    if (a !== 64) {
-      t = t + dechar(i);
-    }
-  }
-  let t2 = "";
-  let n2 = 0;
-  let r2 = 0, c2 = 0, c3 = 0;
-  while (n2 < t.length) {
-    r2 = t.charCodeAt(n2);
-    if (r2 < 128) {
-      t2 += dechar(r2);
-      n2++;
-    } else if (r2 > 191 && r2 < 224) {
-      c2 = t.charCodeAt(n2 + 1);
-      t2 += dechar((r2 & 31) << 6 | c2 & 63);
-      n2 += 2;
-    } else {
-      c2 = t.charCodeAt(n2 + 1);
-      c3 = t.charCodeAt(n2 + 2);
-      t2 += dechar((r2 & 15) << 12 | (c2 & 63) << 6 | c3 & 63);
-      n2 += 3;
-    }
-  }
-  return t2;
-};
-function decodeStream(x, yVal) {
-  if (x.startsWith("#1")) {
-    return saltD(pepper(x.substring(2), -1, yVal));
-  } else if (x.startsWith("#0")) {
-    return saltD(x.substring(2));
-  } else {
-    return x;
-  }
-}
-function unpackPacker(code) {
-  if (!code || !code.includes("eval(function(p,a,c,k,e,d)")) {
-    return code;
-  }
-  try {
-    const match = code.match(/}\s*\(\s*(['"])([\s\S]*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])([\s\S]*?)\5\s*\.split\s*\(\s*(['"])\|\7\s*\)/);
-    if (!match)
-      return code;
-    const p = match[2];
-    const a = parseInt(match[3], 10);
-    const c = parseInt(match[4], 10);
-    const k = match[6].split("|");
-    const e = function(c2) {
-      return (c2 < a ? "" : e(parseInt(c2 / a))) + ((c2 = c2 % a) > 35 ? String.fromCharCode(c2 + 29) : c2.toString(36));
-    };
-    const d = {};
-    let count = c;
-    while (count--) {
-      d[e(count)] = k[count] || e(count);
-    }
-    return p.replace(/\b\w+\b/g, (word) => {
-      return d[word] !== void 0 ? d[word] : word;
-    });
-  } catch (err) {
-    return code;
-  }
-}
 
 // src/cinemacity/index.js
+function searchMedia(searchQuery) {
+  return __async(this, null, function* () {
+    const searchUrl = `${MAIN_URL}/?do=search&subaction=search&search_start=0&full_search=0&story=${encodeURIComponent(searchQuery)}`;
+    const searchHtml = yield fetchText(searchUrl);
+    const $search = import_cheerio_without_node_native.default.load(searchHtml);
+    let mediaUrl = null;
+    $search("div.dar-short_item").each((i, el) => {
+      if (mediaUrl)
+        return;
+      const anchor = $search(el).find("a").filter((idx, a) => ($search(a).attr("href") || "").includes(".html")).first();
+      if (anchor.length) {
+        mediaUrl = anchor.attr("href");
+      }
+    });
+    if (!mediaUrl) {
+      console.log(`[CinemaCity] Standard search returned no results, trying Ajax fallback search...`);
+      let dleHash = null;
+      const hashMatch = searchHtml.match(/dle_login_hash\s*=\s*'([^']+)'/);
+      if (hashMatch) {
+        dleHash = hashMatch[1];
+      } else {
+        const inputMatch = searchHtml.match(/name=["']dle_hash["']\s+value=["']([^"']+)["']/i) || searchHtml.match(/value=["']([^"']+)["']\s+name=["']dle_hash["']/i);
+        if (inputMatch)
+          dleHash = inputMatch[1];
+      }
+      if (!dleHash) {
+        try {
+          const homeHtml = yield fetchText(MAIN_URL);
+          const homeHashMatch = homeHtml.match(/dle_login_hash\s*=\s*'([^']+)'/);
+          if (homeHashMatch)
+            dleHash = homeHashMatch[1];
+        } catch (err) {
+        }
+      }
+      if (dleHash) {
+        try {
+          const res = yield fetch(`${MAIN_URL}/engine/mods/dle_search/ajax.php`, {
+            method: "POST",
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Origin": MAIN_URL,
+              "Referer": `${MAIN_URL}/`,
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            body: `story=${encodeURIComponent(searchQuery)}&dle_hash=${dleHash}&thisUrl=1`
+          });
+          if (res.ok) {
+            const data = yield res.json();
+            if (data && data.content) {
+              const $ajax = import_cheerio_without_node_native.default.load(data.content);
+              $ajax("div.dle-fast_item").each((i, el) => {
+                if (mediaUrl)
+                  return;
+                const anchor = $ajax(el).find("a").filter((idx, a) => ($ajax(a).attr("href") || "").includes(".html")).first();
+                if (anchor.length) {
+                  mediaUrl = anchor.attr("href");
+                }
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`[CinemaCity] Ajax search error: ${e.message}`);
+        }
+      }
+    }
+    return mediaUrl;
+  });
+}
+function cleanTitle(title) {
+  return title.replace(/[^0-9A-Za-z\s._-]/g, "").replace(/[\s_]+/g, ".").replace(/\.+/g, ".").replace(/^\.|\.$/g, "");
+}
+function filterSubs(subtitlesRaw, video) {
+  if (!subtitlesRaw || typeof subtitlesRaw !== "string")
+    return "";
+  const lastSlashIdx = video.lastIndexOf("/");
+  const videoFilename = lastSlashIdx !== -1 ? video.substring(lastSlashIdx + 1) : video;
+  const baseName = videoFilename.split("_web-dl")[0].split("_202")[0];
+  const subsList = subtitlesRaw.split(",");
+  const matchingSubs = [];
+  subsList.forEach((s) => {
+    const match = s.trim().match(/\[(.+?)\](.+)/);
+    if (match) {
+      const subUrl = match[2];
+      if (subUrl.includes(baseName)) {
+        const pfIdx = subUrl.indexOf("/public_files/");
+        if (pfIdx !== -1) {
+          matchingSubs.push(subUrl.substring(pfIdx + "/public_files/".length()));
+        } else {
+          matchingSubs.push(subUrl);
+        }
+      }
+    }
+  });
+  return matchingSubs.join(",");
+}
+function makeDownloadHref(base, videoPath, audioPath, subtitlePaths, name) {
+  let url = base;
+  url += `?action=download`;
+  url += `&video=${encodeURIComponent(videoPath)}`;
+  url += `&audio=${encodeURIComponent(audioPath)}`;
+  if (subtitlePaths && subtitlePaths.length > 0) {
+    url += `&subtitle=${encodeURIComponent(subtitlePaths)}`;
+  }
+  url += `&name=${encodeURIComponent(name)}`;
+  return url;
+}
 function getStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     var _a;
@@ -242,37 +240,11 @@ function getStreams(tmdbId, mediaType, season, episode) {
       if (!animeTitle && !imdbId)
         return [];
       const searchQuery = imdbId || animeTitle;
-      const searchUrl = `${MAIN_URL}/?do=search&subaction=search&search_start=0&full_search=0&story=${encodeURIComponent(searchQuery)}`;
       console.log(`[CinemaCity] Searching for: ${searchQuery}`);
-      const searchHtml = yield fetchText(searchUrl);
-      const $search = import_cheerio_without_node_native.default.load(searchHtml);
-      let mediaUrl = null;
-      $search("div.dar-short_item").each((i, el) => {
-        if (mediaUrl)
-          return;
-        const anchor = $search(el).find("a").filter((idx, a) => ($search(a).attr("href") || "").includes(".html")).first();
-        if (!anchor.length)
-          return;
-        const href = anchor.attr("href");
-        const foundTitle = anchor.text().toLowerCase();
-        if (imdbId && searchHtml.includes(imdbId)) {
-          mediaUrl = href;
-        } else if (foundTitle.includes(animeTitle.toLowerCase()) || animeTitle.toLowerCase().includes(foundTitle)) {
-          mediaUrl = href;
-        }
-      });
+      let mediaUrl = yield searchMedia(searchQuery);
       if (!mediaUrl && imdbId && searchQuery !== animeTitle) {
         console.log(`[CinemaCity] IMDB search failed, falling back to title search: ${animeTitle}`);
-        const titleSearchUrl = `${MAIN_URL}/?do=search&subaction=search&search_start=0&full_search=0&story=${encodeURIComponent(animeTitle)}`;
-        const titleSearchHtml = yield fetchText(titleSearchUrl);
-        const $titleSearch = import_cheerio_without_node_native.default.load(titleSearchHtml);
-        $titleSearch("div.dar-short_item").each((i, el) => {
-          if (mediaUrl)
-            return;
-          const anchor = $titleSearch(el).find("a").filter((idx, a) => ($titleSearch(a).attr("href") || "").includes(".html")).first();
-          if (anchor.length)
-            mediaUrl = anchor.attr("href");
-        });
+        mediaUrl = yield searchMedia(animeTitle);
       }
       if (!mediaUrl) {
         console.log(`[CinemaCity] No media found for ${animeTitle}`);
@@ -281,121 +253,89 @@ function getStreams(tmdbId, mediaType, season, episode) {
       console.log(`[CinemaCity] Loading media page: ${mediaUrl}`);
       const pageHtml = yield fetchText(mediaUrl);
       const $page = import_cheerio_without_node_native.default.load(pageHtml);
-      let fileData = null;
-      let globalSubtitleData = null;
-      const decodedScripts = [];
+      let playerConfig = null;
       $page("script").each((i, el) => {
-        const html = $page(el).html();
-        if (html && html.includes("atob")) {
+        if (playerConfig)
+          return;
+        const html = $page(el).html() || "";
+        if (html.includes("atob")) {
           const regex = /atob\s*\(\s*(['"])(.*?)\1\s*\)/g;
           let match;
           while ((match = regex.exec(html)) !== null) {
             try {
-              decodedScripts.push(atobPolyfill(match[2]));
+              const decoded = atobPolyfill(match[2]);
+              if (decoded.includes("new Playerjs(")) {
+                const configStr = decoded.split("new Playerjs(")[1].split(");")[0].trim();
+                playerConfig = JSON.parse(configStr);
+                break;
+              }
             } catch (e) {
             }
           }
         }
       });
-      let playerjsPath = null;
-      for (const ds of decodedScripts) {
-        const m = ds.match(/['"]([^'"]*?\/playerjs\.js\??\d*)['"]/);
-        if (m) {
-          playerjsPath = m[1];
-          break;
-        }
-      }
-      if (playerjsPath) {
-        try {
-          const playerjsUrl = playerjsPath.startsWith("http") ? playerjsPath : `${MAIN_URL}${playerjsPath.startsWith("/") ? "" : "/"}${playerjsPath}`;
-          console.log(`[CinemaCity] Loading dynamic player script: ${playerjsUrl}`);
-          let playerjsCode = yield fetchText(playerjsUrl);
-          playerjsCode = unpackPacker(playerjsCode);
-          const uMatch = playerjsCode.match(/u\s*:\s*\\?['"](#1.*?)\\?['"]/);
-          const yMatch = playerjsCode.match(/\by\s*:\s*\\?['"](.*?)\\?['"]/);
-          if (uMatch) {
-            const encryptedU = uMatch[1];
-            const yVal = yMatch ? yMatch[1] : "";
-            const decrypted = decodeStream(encryptedU, yVal);
-            if (decrypted) {
-              try {
-                const parsed = JSON.parse(decrypted);
-                let rawFile = parsed.file || decrypted;
-                if (typeof rawFile === "string") {
-                  rawFile = rawFile.replace(/pjs'qt/g, '"');
-                  if (rawFile.startsWith("[") || rawFile.startsWith("{")) {
-                    try {
-                      fileData = JSON.parse(rawFile);
-                    } catch (e) {
-                      fileData = rawFile;
-                    }
-                  } else {
-                    fileData = rawFile;
-                  }
-                } else {
-                  fileData = rawFile;
-                }
-                globalSubtitleData = parsed.subtitle;
-              } catch (e) {
-                fileData = decrypted;
-              }
-            }
-          }
-        } catch (err) {
-          console.error(`[CinemaCity] Error fetching/decrypting player script: ${err.message}`);
-        }
-      }
-      if (!fileData) {
-        for (const decoded of decodedScripts) {
-          const fileMatch = decoded.match(new RegExp(`file\\s*:\\s*(['"])(.*?)\\1`, "s")) || decoded.match(new RegExp("file\\s*:\\s*(\\[.*?\\])", "s")) || decoded.match(new RegExp("file\\s*:\\s*(\\{.*?\\})", "s"));
-          const subMatch = decoded.match(new RegExp(`subtitle\\s*:\\s*(['"])(.*?)\\1`, "s"));
-          if (fileMatch) {
-            let rawFile = fileMatch[2] || fileMatch[1];
-            if (rawFile && rawFile.length > 5) {
-              if (rawFile.startsWith("[") || rawFile.startsWith("{")) {
-                try {
-                  const unescaped = rawFile.replace(/\\(.)/g, "$1");
-                  fileData = JSON.parse(unescaped);
-                } catch (e) {
-                  try {
-                    fileData = JSON.parse(rawFile);
-                  } catch (e2) {
-                    fileData = rawFile;
-                  }
-                }
-              } else {
-                fileData = rawFile;
-              }
-            }
-          }
-          if (subMatch) {
-            globalSubtitleData = subMatch[2];
-          }
-          if (fileData)
-            break;
-        }
-      }
-      if (!fileData) {
-        console.log(`[CinemaCity] Failed to extract player data`);
+      if (!playerConfig || !playerConfig.file) {
+        console.log(`[CinemaCity] Failed to extract player config`);
         return [];
       }
-      const parseSubtitles = (raw) => {
-        const subtitles = [];
-        if (!raw || typeof raw !== "string")
-          return subtitles;
-        raw.split(",").forEach((entry) => {
-          const match = entry.trim().match(/\[(.+?)\](https?:\/\/.+)/);
+      let fileStr = "";
+      let subtitlesStr = "";
+      if (mediaType === "tv") {
+        if (Array.isArray(playerConfig.file)) {
+          const seasonRegex = new RegExp(`season\\s*${season}\\b`, "i");
+          const sObj = playerConfig.file.find((f) => {
+            const title = f.title || "";
+            return seasonRegex.test(title) || title.includes(`\u0421\u0435\u0437\u043E\u043D ${season}`) || title.includes(`S${season}`);
+          }) || playerConfig.file[0];
+          if (sObj) {
+            const episodes = sObj.folder || [];
+            if (Array.isArray(episodes)) {
+              const episodeRegex = new RegExp(`episode\\s*${episode}\\b`, "i");
+              const eObj = episodes.find((e) => {
+                const title = e.title || "";
+                return episodeRegex.test(title) || title.includes(`\u0421\u0435\u0440\u0438\u044F ${episode}`) || title.includes(`E${episode}`);
+              }) || episodes[0];
+              if (eObj) {
+                fileStr = eObj.file || "";
+                subtitlesStr = eObj.subtitle || sObj.subtitle || playerConfig.subtitle || "";
+              }
+            }
+          }
+        }
+      } else {
+        if (Array.isArray(playerConfig.file)) {
+          const fileObj = playerConfig.file.find((f) => !f.folder && f.file) || playerConfig.file[0];
+          if (fileObj) {
+            fileStr = fileObj.file || "";
+            subtitlesStr = fileObj.subtitle || playerConfig.subtitle || "";
+          }
+        } else if (typeof playerConfig.file === "string") {
+          fileStr = playerConfig.file;
+          subtitlesStr = playerConfig.subtitle || "";
+        }
+      }
+      if (!fileStr) {
+        console.log(`[CinemaCity] No file string found for selection`);
+        return [];
+      }
+      const parsedSubtitles = [];
+      if (subtitlesStr && typeof subtitlesStr === "string") {
+        subtitlesStr.split(",").forEach((entry) => {
+          const match = entry.trim().match(/\[(.+?)\](https?:\/\/.+)/) || entry.trim().match(/\[(.+?)\](\/.+)/);
           if (match) {
-            subtitles.push({
-              url: match[2],
+            let subUrl = match[2];
+            if (subUrl.startsWith("/")) {
+              subUrl = `${MAIN_URL}${subUrl}`;
+            }
+            parsedSubtitles.push({
+              url: subUrl,
               language: match[1],
               name: match[1],
               headers: { Referer: "https://cinemacity.cc/" }
             });
           }
         });
-        return subtitles;
-      };
+      }
       const addStream = (url, title, quality, subtitles) => {
         if (!url || !url.startsWith("http") || url.length < 15)
           return;
@@ -410,60 +350,48 @@ function getStreams(tmdbId, mediaType, season, episode) {
           subtitles: subtitles || []
         });
       };
-      const processStr = (str, title, subtitles, overrideQuality) => {
-        if (str.includes(".urlset/master.m3u8")) {
-          addStream(str, title, overrideQuality || "Auto", subtitles);
-        } else {
-          const urls = str.includes("[") ? str.split(",") : [str];
-          urls.forEach((u) => {
-            const m = u.match(/\[(.*?)\](.*)/);
-            if (m) {
-              let streamUrl = m[2];
-              if (streamUrl.includes(",")) {
-                const parts = streamUrl.split(",");
-                streamUrl = parts.find((p) => !p.endsWith(".m4a")) || parts[0];
-              }
-              addStream(streamUrl, title, overrideQuality || m[1], subtitles);
-            } else {
-              let streamUrl = u;
-              if (streamUrl.includes(",")) {
-                const parts = streamUrl.split(",");
-                streamUrl = parts.find((p) => !p.endsWith(".m4a")) || parts[0];
-              }
-              addStream(streamUrl, title, overrideQuality || extractQuality(streamUrl), subtitles);
+      if (fileStr.includes(",")) {
+        const parts = fileStr.split(",").map((p) => p.trim());
+        const videoFiles = parts.filter((p) => p.endsWith(".mp4"));
+        const audioFiles = parts.filter((p) => p.endsWith(".m4a"));
+        if (audioFiles.length > 0) {
+          const cleanedTitle = cleanTitle(animeTitle);
+          audioFiles.forEach((audio, audioIndex) => {
+            const lastUnderAudio = audio.lastIndexOf("_");
+            const filenamePartAudio = lastUnderAudio !== -1 ? audio.substring(lastUnderAudio + 1) : audio;
+            const langRaw = filenamePartAudio.split(".m4a")[0];
+            let lang = langRaw.replace(/-/g, " ");
+            if (lang.length > 0) {
+              lang = lang.charAt(0).toUpperCase() + lang.slice(1);
             }
+            videoFiles.forEach((video) => {
+              const lastUnderVideo = video.lastIndexOf("_");
+              const filenamePartVideo = lastUnderVideo !== -1 ? video.substring(lastUnderVideo + 1) : video;
+              const res = filenamePartVideo.split(".mp4")[0];
+              const quality = extractQuality(video);
+              let dlName = "";
+              if (mediaType === "tv") {
+                const s = String(season).padStart(2, "0");
+                const e = String(episode).padStart(2, "0");
+                dlName = `${cleanedTitle}.S${s}E${e}.${res}.${lang.replace(/\s+/g, ".")}`;
+              } else {
+                dlName = `${cleanedTitle}.WEB-DL.${res}.${lang.replace(/\s+/g, ".")}`;
+              }
+              const subs = filterSubs(subtitlesStr, video);
+              const muxedUrl = makeDownloadHref(fileStr, video, audio, subs, dlName);
+              addStream(muxedUrl, `${animeTitle} (${lang})`, quality, parsedSubtitles);
+            });
+          });
+        } else {
+          videoFiles.forEach((video) => {
+            addStream(video, animeTitle, extractQuality(video), parsedSubtitles);
           });
         }
-      };
-      if (mediaType === "movie") {
-        if (Array.isArray(fileData)) {
-          const obj = fileData.find((f) => !f.folder && f.file) || fileData[0];
-          if (obj && obj.file) {
-            const subs = parseSubtitles(obj.subtitle || globalSubtitleData);
-            processStr(obj.file, animeTitle, subs);
-          }
-        } else if (typeof fileData === "string") {
-          const subs = parseSubtitles(globalSubtitleData);
-          processStr(fileData, animeTitle, subs);
-        }
       } else {
-        if (Array.isArray(fileData)) {
-          const sObj = findSeason(fileData, season);
-          const folderList = sObj && sObj.folder ? sObj.folder : fileData;
-          const eObj = findEpisode(folderList, episode);
-          if (eObj) {
-            const subs = parseSubtitles(eObj.subtitle || (sObj ? sObj.subtitle : null) || globalSubtitleData);
-            if (eObj.file) {
-              processStr(eObj.file, `${animeTitle} S${season}E${episode}`, subs);
-            } else if (Array.isArray(eObj.folder)) {
-              eObj.folder.forEach((item) => {
-                if (item.file) {
-                  const quality = item.title || extractQuality(item.file);
-                  processStr(item.file, `${animeTitle} S${season}E${episode}`, subs, quality);
-                }
-              });
-            }
-          }
+        if (fileStr.includes(".urlset/master.m3u8")) {
+          addStream(fileStr, animeTitle, "Auto", parsedSubtitles);
+        } else {
+          addStream(fileStr, animeTitle, extractQuality(fileStr), parsedSubtitles);
         }
       }
       console.log(`[CinemaCity] Successfully processed ${streams.length} streams`);
@@ -473,35 +401,5 @@ function getStreams(tmdbId, mediaType, season, episode) {
       return [];
     }
   });
-}
-function findSeason(folders, season) {
-  if (!folders || !Array.isArray(folders))
-    return null;
-  const sStr = String(season);
-  const sStrPad = sStr.padStart(2, "0");
-  const regex = new RegExp(`\\b(\u0441\u0435\u0437\u043E\u043D|season|s|seaz)\\b.*?\\b(${sStr}|${sStrPad})\\b|\\b(${sStr}|${sStrPad})\\b.*?(\u0441\u0435\u0437\u043E\u043D|season|s|seaz)`, "i");
-  let found = folders.find((f) => regex.test(f.title || ""));
-  if (found)
-    return found;
-  found = folders.find((f) => {
-    const title = (f.title || "").toLowerCase();
-    return title.includes(sStr) || title.includes(sStrPad);
-  });
-  return found || folders[0];
-}
-function findEpisode(folderList, episode) {
-  if (!folderList || !Array.isArray(folderList))
-    return null;
-  const eStr = String(episode);
-  const eStrPad = eStr.padStart(2, "0");
-  const regex = new RegExp(`\\b(\u0441\u0435\u0440\u0438\u044F|episode|ep|e|seria)\\b.*?\\b(${eStr}|${eStrPad})\\b|\\b(${eStr}|${eStrPad})\\b.*?(\u0441\u0435\u0440\u0438\u044F|episode|ep|e|seria)`, "i");
-  let found = folderList.find((f) => regex.test(f.title || ""));
-  if (found)
-    return found;
-  found = folderList.find((f) => {
-    const title = (f.title || "").toLowerCase();
-    return title.includes(eStr) || title.includes(eStrPad);
-  });
-  return found || folderList[0];
 }
 module.exports = { getStreams };
